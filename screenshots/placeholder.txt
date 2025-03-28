@@ -1,0 +1,11 @@
+To complete the README screenshot setup:
+
+1. Open the generated HTML files in your browser:
+   - ui_screenshot.html - For the main interface screenshot
+   - ui_screenshot_completed.html - For the completed generation progress screenshot
+
+2. Take screenshots of these pages and save them in this directory with the following names:
+   - simulator_ui.png - For the main interface
+   - generation_progress.png - For the generation progress
+
+These will be referenced in the README.md file.
