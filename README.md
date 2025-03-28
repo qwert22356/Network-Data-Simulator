@@ -65,11 +65,14 @@ All data is saved in Parquet format for efficient storage and fast loading. File
 
 ## 📸 Screenshots
 
-![Network Data Simulator UI](screenshots/simulator_ui.png)
+![Network Data Simulator UI](screenshots/Network Data Simulator.jpg)
 *Main interface with simulation parameters*
 
-![Generation Progress](screenshots/generation_progress.png)
-*Real-time progress tracking during data generation*
+![Generation Progress](screenshots/支持场景模拟.jpg)
+*Support Choosing different Scenarios*
+
+![Generation Progress](screenshots/生成100万条所需时间非常慢.jpg)
+*Super slow speed when generating 1M data*
 
 ## 📄 License
 
