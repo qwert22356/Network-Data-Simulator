@@ -8,4 +8,4 @@ To complete the README screenshot setup:
    - simulator_ui.png - For the main interface
    - generation_progress.png - For the generation progress
 
-These will be referenced in the README.md file.
+These will be referenced in the README.md file. 
