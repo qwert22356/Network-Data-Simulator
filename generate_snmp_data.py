@@ -13,6 +13,11 @@ from random import choice, randint, uniform, sample
 VENDORS = ['Cisco', 'Huawei', 'Juniper', 'Arista', 'Dell', 'Broadcom Sonic', 'Community Sonic']
 OPTICAL_VENDORS = ['Innolight', 'Luxshare', 'Finisar', 'HGTECH', 'Eoptolink', 'Accelink']
 SPEEDS = ['1G', '10G', '25G', '100G', '200G', '400G', '800G']
+DATACENTERS = ["DC1", "DC2", "DC3"]
+PODS = ["Pod01", "Pod02", "Pod03", "Pod04"]
+RACKS = ["Rack01", "Rack02", "Rack03", "Rack04", "Rack05"]
+SWITCHES = [f"SW{i:02d}" for i in range(1, 21)]
+INTERFACES = [f"Eth{i}/{j}" for i in range(1, 9) for j in range(1, 9)]
 SPEED_TO_CAPACITY = {
     '1G': 1000000000,
     '10G': 10000000000,
@@ -127,7 +132,7 @@ def generate_interfaces(devices, environment):
         
         for i in range(1, num_ports + 1):
             # Basic interface properties
-            if_name = f"Ethernet{randint(1,8)}/{i}"
+            if_name = f"Eth{randint(1,8)}/{i}"
             if_alias = choice([f"to_{choice(['spine', 'leaf', 'core', 'border'])}-{randint(1,100)}", "", f"Server{randint(1,500)}"])
             if_type = choice(INTERFACE_TYPES)
             if_mtu = choice([1500, 9000, 9216])
@@ -147,7 +152,14 @@ def generate_interfaces(devices, environment):
             optical_present = random.random() > 0.3  # 70% chance of having optics
             
             if optical_present and if_speed != '1G':  # 1G usually doesn't have pluggable optics
+                datacenter = choice(DATACENTERS)
+                pod = choice(PODS)
+                rack = choice(RACKS)
                 optical_vendor = choice(OPTICAL_VENDORS)
+                
+                # 使用统一格式创建module_id
+                module_id = f"{optical_vendor}-{datacenter}-{pod}-{rack}-{device['name']}-{if_name}-{if_speed}"
+                
                 optical_serial = f"{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', k=8))}"
                 optical_part = f"{optical_vendor}-{if_speed}-{choice(['SR', 'LR', 'PSM4', 'CWDM4', 'LR4', 'SR4', 'AOC', 'DAC'])}"
                 # Optical parameters - modified per requirements
@@ -157,6 +169,7 @@ def generate_interfaces(devices, environment):
                 tx_power = uniform(-2.0, 2.0)  # Match generate_ddm values
                 rx_power = uniform(-4.0, 1.0)  # Match generate_ddm values
             else:
+                module_id = ""
                 optical_vendor = ""
                 optical_serial = ""
                 optical_part = ""
@@ -200,32 +213,34 @@ def generate_interfaces(devices, environment):
                 'device_name': device['name'],
                 'vendor': device['vendor'],
                 'if_index': if_index,
-                'if_descr': if_descr,
                 'if_name': if_name,
+                'if_descr': if_descr,
                 'if_alias': if_alias,
                 'if_type': if_type,
                 'if_mtu': if_mtu,
-                'if_speed': speed_bps,
+                'if_speed': if_speed,
+                'if_speed_bps': speed_bps,
                 'if_admin_status': admin_status,
                 'if_oper_status': oper_status,
                 'if_last_change': last_change,
-                'if_in_octets': in_octets,
-                'if_out_octets': out_octets,
-                'if_in_packets': in_packets,
-                'if_out_packets': out_packets,
-                'if_in_errors': in_errors,
-                'if_out_errors': out_errors,
-                'if_in_discards': in_discards,
-                'if_out_discards': out_discards,
-                'if_media_type': if_speed,
+                'module_id': module_id,
                 'optical_vendor': optical_vendor,
                 'optical_serial': optical_serial,
-                'optical_part_number': optical_part,
-                'optical_temperature': temp,
-                'optical_voltage': voltage,
-                'optical_tx_bias': tx_bias,
-                'optical_tx_power': tx_power,
-                'optical_rx_power': rx_power
+                'optical_part': optical_part,
+                'temp': temp,
+                'voltage': voltage,
+                'tx_bias': tx_bias,
+                'tx_power': tx_power,
+                'rx_power': rx_power,
+                'in_octets': in_octets,
+                'out_octets': out_octets,
+                'in_packets': in_packets,
+                'out_packets': out_packets,
+                'in_errors': in_errors,
+                'out_errors': out_errors,
+                'in_discards': in_discards,
+                'out_discards': out_discards,
+                'oid_prefix': device['oid_prefix']
             }
             
             all_interfaces.append(interface)
@@ -276,42 +291,42 @@ def generate_snmp_data(devices, interfaces, num_samples, start_date, end_date):
         if interface['if_oper_status'] == 'up':
             traffic_multiplier = 1 + (i / num_samples) * uniform(0.8, 1.2)
             
-            interface_updated['if_in_octets'] = max(1000, int(interface['if_in_octets'] * traffic_multiplier))
-            interface_updated['if_out_octets'] = max(1000, int(interface['if_out_octets'] * traffic_multiplier))
-            interface_updated['if_in_packets'] = max(1000, int(interface['if_in_packets'] * traffic_multiplier))
-            interface_updated['if_out_packets'] = max(1000, int(interface['if_out_packets'] * traffic_multiplier))
+            interface_updated['in_octets'] = max(1000, int(interface['in_octets'] * traffic_multiplier))
+            interface_updated['out_octets'] = max(1000, int(interface['out_octets'] * traffic_multiplier))
+            interface_updated['in_packets'] = max(1000, int(interface['in_packets'] * traffic_multiplier))
+            interface_updated['out_packets'] = max(1000, int(interface['out_packets'] * traffic_multiplier))
             
             # Errors and discards may increase slightly but always non-zero
-            interface_updated['if_in_errors'] = max(1, interface['if_in_errors'] + randint(0, 2))
-            interface_updated['if_out_errors'] = max(1, interface['if_out_errors'] + randint(0, 2))
-            interface_updated['if_in_discards'] = max(1, interface['if_in_discards'] + randint(0, 5))
-            interface_updated['if_out_discards'] = max(1, interface['if_out_discards'] + randint(0, 5))
+            interface_updated['in_errors'] = max(1, interface['in_errors'] + randint(0, 2))
+            interface_updated['out_errors'] = max(1, interface['out_errors'] + randint(0, 2))
+            interface_updated['in_discards'] = max(1, interface['in_discards'] + randint(0, 5))
+            interface_updated['out_discards'] = max(1, interface['out_discards'] + randint(0, 5))
         else:
             # For inactive interfaces, keep the values relatively stable
-            interface_updated['if_in_octets'] = max(1000, interface['if_in_octets'])
-            interface_updated['if_out_octets'] = max(1000, interface['if_out_octets'])
-            interface_updated['if_in_packets'] = max(1000, interface['if_in_packets'])
-            interface_updated['if_out_packets'] = max(1000, interface['if_out_packets'])
-            interface_updated['if_in_errors'] = max(1, interface['if_in_errors'])
-            interface_updated['if_out_errors'] = max(1, interface['if_out_errors'])
-            interface_updated['if_in_discards'] = max(1, interface['if_in_discards'])
-            interface_updated['if_out_discards'] = max(1, interface['if_out_discards'])
+            interface_updated['in_octets'] = max(1000, interface['in_octets'])
+            interface_updated['out_octets'] = max(1000, interface['out_octets'])
+            interface_updated['in_packets'] = max(1000, interface['in_packets'])
+            interface_updated['out_packets'] = max(1000, interface['out_packets'])
+            interface_updated['in_errors'] = max(1, interface['in_errors'])
+            interface_updated['out_errors'] = max(1, interface['out_errors'])
+            interface_updated['in_discards'] = max(1, interface['in_discards'])
+            interface_updated['out_discards'] = max(1, interface['out_discards'])
         
         # Optical parameters fluctuate according to updated requirements
         if interface['optical_vendor']:
             # Use consistent ranges with optical module values from generate_ddm
-            interface_updated['optical_temperature'] = max(10.0, min(90.0, interface['optical_temperature'] + uniform(-2, 2)))
-            interface_updated['optical_voltage'] = max(2.33, min(4.32, interface['optical_voltage'] + uniform(-0.05, 0.05)))
-            interface_updated['optical_tx_bias'] = max(10.0, min(80.0, interface['optical_tx_bias'] + uniform(-1, 1)))
-            interface_updated['optical_tx_power'] = min(2.0, max(-7.0, interface['optical_tx_power'] + uniform(-0.2, 0.2)))
-            interface_updated['optical_rx_power'] = min(1.0, max(-10.0, interface['optical_rx_power'] + uniform(-0.5, 0.5)))
+            interface_updated['temp'] = max(10.0, min(90.0, interface['temp'] + uniform(-2, 2)))
+            interface_updated['voltage'] = max(2.33, min(4.32, interface['voltage'] + uniform(-0.05, 0.05)))
+            interface_updated['tx_bias'] = max(10.0, min(80.0, interface['tx_bias'] + uniform(-1, 1)))
+            interface_updated['tx_power'] = min(2.0, max(-7.0, interface['tx_power'] + uniform(-0.2, 0.2)))
+            interface_updated['rx_power'] = min(1.0, max(-10.0, interface['rx_power'] + uniform(-0.5, 0.5)))
         else:
             # Even if no optical module present, provide realistic values
-            interface_updated['optical_temperature'] = uniform(10.0, 90.0)
-            interface_updated['optical_voltage'] = uniform(2.33, 4.32)
-            interface_updated['optical_tx_bias'] = uniform(10.0, 80.0)
-            interface_updated['optical_tx_power'] = uniform(-7.0, -5.0)
-            interface_updated['optical_rx_power'] = uniform(-10.0, -8.0)
+            interface_updated['temp'] = uniform(10.0, 90.0)
+            interface_updated['voltage'] = uniform(2.33, 4.32)
+            interface_updated['tx_bias'] = uniform(10.0, 80.0)
+            interface_updated['tx_power'] = uniform(-7.0, -5.0)
+            interface_updated['rx_power'] = uniform(-10.0, -8.0)
         
         # Combine device and interface info in one sample record
         sample = {
@@ -330,32 +345,34 @@ def generate_snmp_data(devices, interfaces, num_samples, start_date, end_date):
             'memory_used': device_updated['memory_used'],
             'memory_total': device['memory_total'],
             'if_index': interface['if_index'],
-            'if_descr': interface['if_descr'],
             'if_name': interface['if_name'],
+            'if_descr': interface['if_descr'],
             'if_alias': interface['if_alias'],
             'if_type': interface['if_type'],
             'if_mtu': interface['if_mtu'],
             'if_speed': interface['if_speed'],
+            'if_speed_bps': interface['if_speed_bps'],
             'if_admin_status': interface['if_admin_status'],
             'if_oper_status': interface['if_oper_status'],
             'if_last_change': interface['if_last_change'],
-            'if_in_octets': interface_updated['if_in_octets'],
-            'if_out_octets': interface_updated['if_out_octets'],
-            'if_in_packets': interface_updated['if_in_packets'],
-            'if_out_packets': interface_updated['if_out_packets'],
-            'if_in_errors': interface_updated['if_in_errors'],
-            'if_out_errors': interface_updated['if_out_errors'],
-            'if_in_discards': interface_updated['if_in_discards'],
-            'if_out_discards': interface_updated['if_out_discards'],
-            'if_media_type': interface['if_media_type'],
+            'module_id': interface['module_id'],
             'optical_vendor': interface['optical_vendor'],
             'optical_serial': interface['optical_serial'],
-            'optical_part_number': interface['optical_part_number'],
-            'optical_temperature': interface_updated['optical_temperature'],
-            'optical_voltage': interface_updated['optical_voltage'],
-            'optical_tx_bias': interface_updated['optical_tx_bias'],
-            'optical_tx_power': interface_updated['optical_tx_power'],
-            'optical_rx_power': interface_updated['optical_rx_power']
+            'optical_part': interface['optical_part'],
+            'temp': interface_updated['temp'],
+            'voltage': interface_updated['voltage'],
+            'tx_bias': interface_updated['tx_bias'],
+            'tx_power': interface_updated['tx_power'],
+            'rx_power': interface_updated['rx_power'],
+            'in_octets': interface_updated['in_octets'],
+            'out_octets': interface_updated['out_octets'],
+            'in_packets': interface_updated['in_packets'],
+            'out_packets': interface_updated['out_packets'],
+            'in_errors': interface_updated['in_errors'],
+            'out_errors': interface_updated['out_errors'],
+            'in_discards': interface_updated['in_discards'],
+            'out_discards': interface_updated['out_discards'],
+            'oid_prefix': interface['oid_prefix']
         }
         
         snmp_samples.append(sample)

@@ -14,6 +14,11 @@ from random import choice, randint, uniform, sample
 VENDORS = ['Cisco', 'Huawei', 'Juniper', 'Arista', 'Dell', 'Broadcom Sonic', 'Community Sonic']
 OPTICAL_VENDORS = ['Innolight', 'Luxshare', 'Finisar', 'HGTECH', 'Eoptolink', 'Accelink']
 SPEEDS = ['1G', '10G', '25G', '100G', '200G', '400G', '800G']
+DATACENTERS = ["DC1", "DC2", "DC3"]
+PODS = ["Pod01", "Pod02", "Pod03", "Pod04"]
+RACKS = ["Rack01", "Rack02", "Rack03", "Rack04", "Rack05"]
+SWITCHES = [f"SW{i:02d}" for i in range(1, 21)]
+INTERFACES = [f"Eth{i}/{j}" for i in range(1, 9) for j in range(1, 9)]
 
 # Network protocol constants
 IP_PROTOCOLS = ['IPv4', 'IPv6']
@@ -281,8 +286,10 @@ def generate_interfaces(devices, environment):
         
         for i in range(1, num_ports + 1):
             # Basic interface properties
-            if_name = f"Ethernet{randint(1,8)}/{i}"
+            if_index = i
+            if_name = f"Eth{randint(1,8)}/{i}"
             if_alias = choice([f"to_{choice(['spine', 'leaf', 'core', 'border'])}-{randint(1,100)}", "", f"Server{randint(1,500)}"])
+            if_type = choice(INTERFACES)
             if_mtu = choice([1500, 9000, 9216])
             
             admin_status = choice(['up', 'down'])
@@ -295,49 +302,81 @@ def generate_interfaces(devices, environment):
             # Random speed based on environment
             if_speed = choice(SPEEDS)
             
-            # QoS parameters
-            qos_enabled = random.random() > 0.2  # 80% chance of QoS enabled
-            qos_policy = f"policy-{randint(1,10)}" if qos_enabled else ""
-            qos_drops = randint(0, 1000) if oper_status == 'up' else 0
+            # Random optical module properties
+            optical_present = random.random() > 0.3  # 70% chance of having optics
             
-            # Queue depths and statistics for active interfaces
-            queues = []
-            if oper_status == 'up' and qos_enabled:
-                # Create queues based on profile count
-                for q in range(device['qos_profiles']):
-                    queue_name = choice(QOS_QUEUES) if q < len(QOS_QUEUES) else f"queue-{q}"
-                    queue_depth = randint(1, 1000)  # Current queue depth
-                    queue_max = randint(1000, 10000)  # Maximum queue depth
-                    queue_drops = randint(1, 1000) if queue_depth > queue_max * 0.8 else randint(0, 10)
-                    
-                    queues.append({
-                        'queue_id': q,
-                        'queue_name': queue_name,
-                        'current_depth': queue_depth,
-                        'max_depth': queue_max,
-                        'drops': queue_drops,
-                        'congestion_algorithm': choice(CONGESTION_ALGORITHMS)
-                    })
-            
-            # Congestion statistics
-            congestion_drops = sum([q.get('drops', 0) for q in queues]) if queues else 0
+            if optical_present and if_speed != '1G':  # 1G usually doesn't have pluggable optics
+                optical_vendor = choice(OPTICAL_VENDORS)
+                datacenter = choice(DATACENTERS)
+                pod = choice(PODS)
+                rack = choice(RACKS)
+                # 使用统一格式创建module_id
+                module_id = f"{optical_vendor}-{datacenter}-{pod}-{rack}-{device['name']}-{if_name}-{if_speed}"
+                
+                # Optical parameters
+                temp = uniform(20.0, 70.0)
+                voltage = uniform(3.0, 3.6)
+                tx_bias = uniform(10.0, 70.0)
+                tx_power = uniform(-2.0, 2.0)
+                rx_power = uniform(-10.0, 1.0)
+            else:
+                module_id = ""
+                optical_vendor = ""
+                temp = 0.0
+                voltage = 0.0
+                tx_bias = 0.0
+                tx_power = 0.0
+                rx_power = 0.0
+                
+            # Interface statistics
+            if oper_status == 'up':
+                in_octets = randint(1000000, 10000000000)
+                out_octets = randint(1000000, 10000000000)
+                in_packets = randint(10000, 100000000) 
+                out_packets = randint(10000, 100000000)
+                in_errors = randint(0, 100)
+                out_errors = randint(0, 100)
+                in_discards = randint(0, 1000)
+                out_discards = randint(0, 1000)
+            else:
+                in_octets = 0
+                out_octets = 0
+                in_packets = 0
+                out_packets = 0
+                in_errors = 0
+                out_errors = 0
+                in_discards = 0
+                out_discards = 0
             
             # Create interface record
             interface = {
-                'device_ip': device['ip'],
                 'device_name': device['name'],
-                'vendor': device['vendor'],
+                'device_ip': device['ip'],
+                'if_index': if_index,
                 'if_name': if_name,
                 'if_alias': if_alias,
+                'if_type': if_type, 
                 'if_mtu': if_mtu,
                 'if_speed': if_speed,
-                'if_admin_status': admin_status,
-                'if_oper_status': oper_status,
-                'qos_enabled': qos_enabled,
-                'qos_policy': qos_policy,
-                'qos_drops': qos_drops,
-                'queues': queues,
-                'congestion_drops': congestion_drops
+                'admin_status': admin_status,
+                'oper_status': oper_status,
+                'module_id': module_id,
+                'optical_vendor': optical_vendor,
+                'temp': temp,
+                'voltage': voltage,
+                'tx_bias': tx_bias,
+                'tx_power': tx_power,
+                'rx_power': rx_power,
+                'in_octets': in_octets,
+                'out_octets': out_octets,
+                'in_packets': in_packets,
+                'out_packets': out_packets,
+                'in_errors': in_errors,
+                'out_errors': out_errors,
+                'in_discards': in_discards,
+                'out_discards': out_discards,
+                'vendor': device['vendor'],
+                'path': VENDOR_PATHS[device['vendor']]['qos']
             }
             
             all_interfaces.append(interface)

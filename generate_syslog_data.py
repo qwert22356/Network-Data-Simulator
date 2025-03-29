@@ -16,6 +16,11 @@ SPEEDS = ['1G', '10G', '25G', '100G', '200G', '400G', '800G']
 FACILITY_LEVELS = ['kern', 'user', 'mail', 'daemon', 'auth', 'syslog', 'lpr', 'news', 'uucp', 'cron', 'authpriv', 'ftp', 'local0', 'local1', 'local2', 'local3', 'local4', 'local5', 'local6', 'local7']
 SEVERITY_LEVELS = ['emerg', 'alert', 'crit', 'err', 'warning', 'notice', 'info', 'debug']
 PROTOCOLS = ['OSPF', 'BGP', 'VXLAN', 'MPLS', 'LLDP', 'STP', 'LACP', 'PIM', 'ISIS', 'VRRP']
+DATACENTERS = ["DC1", "DC2", "DC3"]
+PODS = ["Pod01", "Pod02", "Pod03", "Pod04"]
+RACKS = ["Rack01", "Rack02", "Rack03", "Rack04", "Rack05"]
+SWITCHES = [f"SW{i:02d}" for i in range(1, 21)]
+INTERFACES = [f"Eth{i}/{j}" for i in range(1, 9) for j in range(1, 9)]
 
 # Environment presets
 ENVIRONMENTS = {
@@ -89,9 +94,13 @@ def generate_device_optics(devices, environment):
         num_optics = randint(min_ports, max_ports)
         device_optics[device] = [
             {
-                'port': f"Ethernet{randint(1,8)}/{randint(1,48)}",
+                'port': choice(INTERFACES),
                 'vendor': choice(OPTICAL_VENDORS),
                 'speed': choice(SPEEDS),
+                'datacenter': choice(DATACENTERS),
+                'pod': choice(PODS),
+                'rack': choice(RACKS),
+                'module_id': f"{choice(OPTICAL_VENDORS)}-{choice(DATACENTERS)}-{choice(PODS)}-{choice(RACKS)}-{device}-{choice(INTERFACES)}-{choice(SPEEDS)}",
                 'serial': f"{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', k=8))}"
             } for _ in range(num_optics)
         ]
@@ -316,85 +325,167 @@ def generate_l3_protocol_event(protocol):
     }
     return choice(events.get(protocol, ["State change"]))
 
+def generate_optical_module_message(device, optics_info):
+    """Generate a message related to an optical module"""
+    if not optics_info:
+        return ""
+
+    # Select a random optic from this device
+    optic = choice(optics_info)
+    
+    # Generate module_id if not already present
+    if 'module_id' not in optic:
+        optic['module_id'] = f"{optic['vendor']}-{optic['datacenter']}-{optic['pod']}-{optic['rack']}-{device}-{optic['port']}-{optic['speed']}"
+        
+    event = generate_optical_module_event()
+    
+    if event == "Module inserted":
+        return f"Interface {optic['port']}: Transceiver module ({optic['module_id']}) inserted"
+    elif event == "Module removed":
+        return f"Interface {optic['port']}: Transceiver module ({optic['module_id']}) removed"
+    elif event == "Module not compatible":
+        return f"Interface {optic['port']}: Transceiver module ({optic['module_id']}) not compatible with port configuration"
+    elif event == "Module authentication failed":
+        return f"Interface {optic['port']}: Transceiver module ({optic['module_id']}) authentication failed"
+    elif event == "DDM threshold crossed":
+        ddm_type = choice(["temperature", "voltage", "tx-power", "rx-power", "tx-bias"])
+        threshold = choice(["high alarm", "high warning", "low warning", "low alarm"])
+        value = round(uniform(1.0, 100.0), 2)
+        return f"Interface {optic['port']}: Transceiver module ({optic['module_id']}) {ddm_type} {threshold} threshold crossed. Current value: {value}"
+    elif "power" in event.lower():
+        if "high" in event.lower():
+            value = round(uniform(2.0, 5.0), 2)
+        else:  # low
+            value = round(uniform(-30.0, -15.0), 2)
+        if "rx" in event.lower():
+            return f"Interface {optic['port']}: Transceiver module ({optic['module_id']}) RX power {value} dBm threshold crossed"
+        else:  # tx
+            return f"Interface {optic['port']}: Transceiver module ({optic['module_id']}) TX power {value} dBm threshold crossed"
+    elif "temperature" in event.lower():
+        if "high" in event.lower():
+            value = round(uniform(70.0, 95.0), 2)
+        else:  # low
+            value = round(uniform(-5.0, 10.0), 2)
+        return f"Interface {optic['port']}: Transceiver module ({optic['module_id']}) temperature {value}C threshold crossed"
+    elif "voltage" in event.lower():
+        if "high" in event.lower():
+            value = round(uniform(3.6, 4.5), 2)
+        else:  # low
+            value = round(uniform(2.0, 2.9), 2)
+        return f"Interface {optic['port']}: Transceiver module ({optic['module_id']}) voltage {value}V threshold crossed"
+    elif "bias" in event.lower():
+        if "high" in event.lower():
+            value = round(uniform(80, 120), 2)
+        else:  # low
+            value = round(uniform(1, 10), 2)
+        return f"Interface {optic['port']}: Transceiver module ({optic['module_id']}) bias current {value}mA threshold crossed"
+    else:
+        return f"Interface {optic['port']}: Transceiver module ({optic['module_id']}) {event}"
+
 def generate_message(device, device_info, optics_info, l3_info):
     device_name, ip, vendor = device_info
     
-    # Determine event type
-    event_category = choice(["physical_port", "optical_module", "l3_protocol"])
+    # Pick a message type
+    message_types = [
+        'physical_port', 
+        'optical_module', 
+        'protocol', 
+        'system', 
+        'authentication'
+    ]
     
-    if event_category == "physical_port":
-        port = f"Ethernet{randint(1,8)}/{randint(1,48)}"
+    # Adjust probabilities based on environment - more optical and protocol messages
+    message_type_weights = [0.25, 0.25, 0.25, 0.15, 0.1]
+    message_type = random.choices(message_types, weights=message_type_weights, k=1)[0]
+    
+    if message_type == 'physical_port':
+        # Physical port events (interface up/down, errors, etc.)
         event = generate_physical_port_event()
-        message = f"{device_name}: {port}: {event}"
+        port = f"Eth{randint(1,8)}/{randint(1,48)}"
+        message = f"Interface {port}: {event}"
         
-        # Add more details for specific events
-        if "CRC" in event:
-            message += f", count: {randint(1, 1000)}"
-        elif "FCS" in event:
-            message += f", errors: {randint(1, 500)}"
-        elif "drop" in event:
-            message += f", drops: {randint(1, 10000)}, duration: {randint(1, 60)}s"
-            
-    elif event_category == "optical_module":
-        if not optics_info:
-            # Fallback to physical port if no optics defined
-            port = f"Ethernet{randint(1,8)}/{randint(1,48)}"
-            event = generate_physical_port_event()
-            message = f"{device_name}: {port}: {event}"
+    elif message_type == 'optical_module':
+        # Optical module events
+        if optics_info and device in optics_info and optics_info[device]:
+            message = generate_optical_module_message(device, optics_info[device])
         else:
-            optic = choice(optics_info)
-            port = optic['port']
-            optic_vendor = optic['vendor']
-            optic_speed = optic['speed']
+            # Fallback if no optical info is available
+            port = f"Eth{randint(1,8)}/{randint(1,48)}"
             event = generate_optical_module_event()
+            message = f"Interface {port}: {event}"
             
-            message = f"{device_name}: {port}: {optic_speed} transceiver ({optic_vendor}): {event}"
-            
-            # Add more details for specific events
-            if "power" in event:
-                if "high" in event:
-                    message += f", value: {uniform(2.0, 5.0):.2f} dBm, threshold: {uniform(1.5, 3.0):.2f} dBm"
-                else:
-                    message += f", value: {uniform(-35.0, -20.0):.2f} dBm, threshold: {uniform(-18.0, -15.0):.2f} dBm"
-            elif "Temperature" in event:
-                if "high" in event:
-                    message += f", value: {uniform(70.0, 85.0):.1f}°C, threshold: {uniform(65.0, 75.0):.1f}°C"
-                else:
-                    message += f", value: {uniform(-20.0, -5.0):.1f}°C, threshold: {uniform(-15.0, -5.0):.1f}°C"
-            
-    else:  # l3_protocol
+    elif message_type == 'protocol':
+        # Protocol-related events
         protocol = choice(PROTOCOLS)
         event = generate_l3_protocol_event(protocol)
-        
-        if protocol == "OSPF" and l3_info.get('ospf'):
-            area = l3_info.get('ospf_area', 0)
-            nbr_ip = f"10.{randint(1,254)}.{randint(1,254)}.{randint(1,254)}"
-            message = f"{device_name}: {protocol}: {event}: area {area}, neighbor {nbr_ip}"
-            
-        elif protocol == "BGP" and l3_info.get('bgp'):
-            as_num = l3_info.get('bgp_as', 65000)
+        if protocol == 'BGP' and l3_info.get(device, {}).get('bgp', False):
             peer_ip = f"10.{randint(1,254)}.{randint(1,254)}.{randint(1,254)}"
-            peer_as = randint(1000, 65000)
-            message = f"{device_name}: {protocol}: {event}: peer {peer_ip} (AS {peer_as})"
-            
-        elif protocol == "VXLAN" and l3_info.get('vxlan'):
-            if l3_info.get('vxlan_vni'):
-                vni = choice(l3_info.get('vxlan_vni'))
-                message = f"{device_name}: {protocol}: {event}: VNI {vni}"
-            else:
-                message = f"{device_name}: {protocol}: {event}"
-                
-        elif protocol == "MPLS" and l3_info.get('mpls'):
-            if l3_info.get('mpls_label'):
-                label = choice(l3_info.get('mpls_label'))
-                message = f"{device_name}: {protocol}: {event}: label {label}"
-            else:
-                message = f"{device_name}: {protocol}: {event}"
-                
+            bgp_as = l3_info[device]['bgp_as']
+            message = f"{protocol}: Neighbor {peer_ip} (AS {bgp_as}) {event}"
+        elif protocol == 'OSPF' and l3_info.get(device, {}).get('ospf', False):
+            area_id = l3_info[device]['ospf_area']
+            message = f"{protocol}: {event} in area {area_id}"
+        elif protocol == 'VXLAN' and l3_info.get(device, {}).get('vxlan', False):
+            vni = choice(l3_info[device]['vxlan_vni']) if l3_info[device]['vxlan_vni'] else randint(1000, 9000)
+            message = f"{protocol}: VNI {vni} {event}"
+        elif protocol == 'MPLS' and l3_info.get(device, {}).get('mpls', False):
+            label = choice(l3_info[device]['mpls_label']) if l3_info[device]['mpls_label'] else randint(16, 1048575)
+            message = f"{protocol}: Label {label} {event}"
         else:
-            message = f"{device_name}: {protocol}: {event}"
+            message = f"{protocol}: {event}"
             
-    return message
+    elif message_type == 'system':
+        # System events (CPU, memory, power, fan, etc.)
+        events = [
+            f"System CPU utilization is high: {randint(80,100)}%",
+            f"Memory utilization threshold exceeded: {randint(80,95)}%",
+            f"Power supply {randint(1,2)} state changed to {'up' if random.random() > 0.2 else 'down'}",
+            f"Fan module {randint(1,4)} {'OK' if random.random() > 0.2 else 'failure'}",
+            f"Temperature sensor {randint(1,5)} reading: {randint(25,95)}C",
+            f"System configuration {'saved' if random.random() > 0.5 else 'changed'}",
+            f"NTP synchronization {'successful' if random.random() > 0.3 else 'failed'}",
+            f"Logging {'started' if random.random() > 0.5 else 'stopped'}",
+            f"File system utilization: {randint(60,95)}%",
+            f"SNMP agent {'started' if random.random() > 0.5 else 'stopped'}"
+        ]
+        message = choice(events)
+        
+    else:  # authentication
+        # Authentication events
+        auth_events = [
+            f"User {'admin' if random.random() > 0.7 else 'operator'} login {'successful' if random.random() > 0.3 else 'failed'} from {'.'.join([str(randint(1,255)) for _ in range(4)])}",
+            f"SSH session established from {'.'.join([str(randint(1,255)) for _ in range(4)])}",
+            f"Telnet connection attempt blocked from {'.'.join([str(randint(1,255)) for _ in range(4)])}",
+            f"TACACS+ authentication {'succeeded' if random.random() > 0.3 else 'failed'}",
+            f"RADIUS authentication {'succeeded' if random.random() > 0.3 else 'failed'}",
+            f"User {'admin' if random.random() > 0.7 else 'operator'} entered privileged mode",
+            f"Configuration change by user {'admin' if random.random() > 0.7 else 'operator'}",
+            f"Account locked due to excessive login failures: {'admin' if random.random() > 0.5 else 'operator'}",
+            f"Password change for user {'admin' if random.random() > 0.7 else 'operator'}"
+        ]
+        message = choice(auth_events)
+    
+    # Facility selection based on message type
+    if message_type == 'physical_port' or message_type == 'optical_module':
+        facility = choice(['local3', 'local4', 'daemon'])
+    elif message_type == 'protocol':
+        facility = choice(['local0', 'local1', 'local2'])
+    elif message_type == 'system':
+        facility = choice(['kern', 'daemon', 'syslog'])
+    else:  # authentication
+        facility = choice(['auth', 'authpriv', 'local7'])
+    
+    # Severity selection based on content
+    if 'error' in message.lower() or 'fail' in message.lower() or 'down' in message.lower():
+        severity = choice(['err', 'crit', 'alert'])
+    elif 'warn' in message.lower() or 'high' in message.lower():
+        severity = 'warning'
+    elif 'notif' in message.lower() or 'up' in message.lower() or 'success' in message.lower():
+        severity = 'notice'
+    else:
+        severity = choice(['info', 'debug'])
+    
+    return facility, severity, message
 
 def generate_syslog_data(num_events, start_date, end_date):
     # Convert dates to timestamps
@@ -425,12 +516,8 @@ def generate_syslog_data(num_events, start_date, end_date):
         optics_info = device_optics.get(device_name, [])
         l3_info = device_l3.get(device_name, {})
         
-        # Random severity and facility
-        severity = choice(SEVERITY_LEVELS)
-        facility = choice(FACILITY_LEVELS)
-        
         # Generate message for event
-        message = generate_message(device_name, device_info, optics_info, l3_info)
+        facility, severity, message = generate_message(device_name, device_info, optics_info, l3_info)
         
         # Get appropriate syslog format function based on vendor
         syslog_generator = get_syslog_generator(vendor)
