@@ -488,31 +488,40 @@ def generate_message(device, device_info, optics_info, l3_info):
     return facility, severity, message
 
 def generate_syslog_data(num_events, start_date, end_date):
-    # Convert dates to timestamps
-    start_timestamp = datetime.strptime(start_date, "%Y-%m-%d").timestamp()
-    end_timestamp = datetime.strptime(end_date, "%Y-%m-%d").timestamp()
+    """Generate synthetic syslog messages for network devices"""
+    # Parse start and end dates
+    start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+    end_dt = datetime.strptime(end_date, '%Y-%m-%d')
     
-    # Calculate time interval between events
-    time_range = end_timestamp - start_timestamp
-    interval = time_range / num_events
+    # Calculate time window in seconds
+    time_window = int((end_dt - start_dt).total_seconds())
     
-    syslog_data = []
+    # Environment defaults
+    environment = 'datacenter'  # Default to datacenter environment
     
-    for i in range(num_events):
-        # Generate timestamp for this event
-        event_time = start_timestamp + interval * i
-        event_datetime = datetime.fromtimestamp(event_time)
+    # Generate device information
+    num_devices = min(100, num_events // 10)  # Ensure reasonable number of devices
+    devices = setup_network_devices(environment, num_devices)
+    
+    # Generate optics information
+    device_optics = generate_device_optics(devices, environment)
+    
+    # Generate L3 protocol information
+    device_l3 = generate_device_l3_config(devices, environment)
+    
+    # Generate the events
+    syslog_events = []
+    
+    for _ in range(num_events):
+        # Random timestamp within date range
+        event_timestamp = start_dt + timedelta(seconds=randint(0, time_window))
+        timestamp_str = event_timestamp.strftime('%Y-%m-%d %H:%M:%S')
         
-        # Format timestamp as "%Y-%m-%d %H:%M:%S" to match generate_ddm_data
-        formatted_timestamp = event_datetime.strftime("%Y-%m-%d %H:%M:%S")
-        # For syslog format we'll still use the traditional format
-        syslog_timestamp = event_datetime.strftime("%b %d %H:%M:%S")
-        
-        # Select random device
+        # Select a random device
         device_info = choice(devices)
         device_name, ip, vendor = device_info
         
-        # Get device specifics
+        # Get device-specific information
         optics_info = device_optics.get(device_name, [])
         l3_info = device_l3.get(device_name, {})
         
@@ -522,24 +531,114 @@ def generate_syslog_data(num_events, start_date, end_date):
         # Get appropriate syslog format function based on vendor
         syslog_generator = get_syslog_generator(vendor)
         
-        # Generate syslog line
-        syslog_line = syslog_generator(syslog_timestamp, device_name, ip, severity, facility, message)
+        # Generate syslog message
+        syslog_msg = syslog_generator(timestamp_str, device_name, ip, severity, facility, message)
         
-        # Create structured data
-        data_row = {
-            'timestamp': formatted_timestamp,  # Use formatted timestamp for consistency
-            'device': device_name,
-            'ip': ip,
-            'vendor': vendor,
-            'severity': severity,
+        # Create syslog record with standard fields
+        record = {
+            'timestamp': timestamp_str,
+            'device_ip': ip,
+            'device_name': device_name,
             'facility': facility,
+            'severity': severity,
+            'vendor': vendor,
             'message': message,
-            'raw_log': syslog_line
+            'syslog_message': syslog_msg,
+            'module_id': ""  # 默认为空字符串
         }
         
-        syslog_data.append(data_row)
+        # 判断是否为光模块相关消息并提取/生成module_id
+        optical_related_keywords = [
+            'module', 'transceiver', 'optical', 'tx power', 'rx power', 
+            'temperature', 'voltage', 'bias', 'ddm'
+        ]
         
-    return pd.DataFrame(syslog_data)
+        is_optical_message = False
+        # 检查消息中是否包含关键字(不区分大小写)
+        lowercase_message = message.lower()
+        for keyword in optical_related_keywords:
+            if keyword in lowercase_message:
+                is_optical_message = True
+                break
+        
+        # 如果是光模块相关消息，生成或提取module_id
+        if is_optical_message:
+            # 从消息中提取module_id (如果有)
+            if "(" in message and ")" in message:
+                module_id_part = message[message.find("(")+1:message.find(")")]
+                if "-" in module_id_part and module_id_part.count("-") >= 6:  # 符合格式的module_id应该有至少6个连字符
+                    record['module_id'] = module_id_part
+                else:
+                    # 生成新的module_id
+                    record['module_id'] = create_new_module_id(device_name, message, optics_info)
+            else:
+                # 没有括号中的module_id，需要新生成
+                record['module_id'] = create_new_module_id(device_name, message, optics_info)
+                
+        syslog_events.append(record)
+    
+    return syslog_events
+
+def create_new_module_id(device_name, message, optics_info):
+    """从消息和可用的光模块信息创建module_id"""
+    # 尝试从消息中提取接口名称
+    interface = None
+    if "Interface " in message:
+        # 消息格式可能是 "Interface Eth1/1: something"
+        parts = message.split(":")
+        if len(parts) > 0:
+            interface_part = parts[0].strip()
+            if "Interface " in interface_part:
+                interface = interface_part.replace("Interface ", "").strip()
+    
+    # 如果接口提取成功，尝试在已有optics信息中查找匹配的module_id
+    if interface and optics_info:
+        for optic in optics_info:
+            if optic.get('port') == interface and 'module_id' in optic:
+                return optic['module_id']
+    
+    # 如果没有找到匹配的module_id，创建一个新的
+    optical_vendor = choice(OPTICAL_VENDORS)
+    datacenter = choice(DATACENTERS)
+    pod = choice(PODS)
+    rack = choice(RACKS)
+    
+    # 如果接口名称未能提取，生成一个随机接口
+    if not interface:
+        interface = f"Eth{randint(1,8)}/{randint(1,48)}"
+        
+    speed = choice(SPEEDS)
+    
+    return f"{optical_vendor}-{datacenter}-{pod}-{rack}-{device_name}-{interface}-{speed}"
+
+def write_to_parquet(syslog_events, output_file='syslog_data.parquet'):
+    """Convert syslog events to a Parquet file"""
+    # Convert to DataFrame
+    df = pd.DataFrame(syslog_events)
+    
+    # Ensure all required columns exist
+    required_columns = ['timestamp', 'device_ip', 'device_name', 'facility', 
+                        'severity', 'vendor', 'message', 'syslog_message', 'module_id']
+    
+    for col in required_columns:
+        if col not in df.columns:
+            if col == 'module_id':
+                df[col] = ""
+            else:
+                df[col] = None
+    
+    # Write to Parquet format
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    
+    table = pa.Table.from_pandas(df)
+    pq.write_table(table, output_file)
+    
+    print(f"Generated {len(syslog_events)} syslog events and saved to {output_file}")
+    print(f"Data includes {df['device_name'].nunique()} devices")
+    print(f"Fields included: {len(df.columns)}")
+    
+    return output_file
 
 def main():
     # Add argument parsing
@@ -566,22 +665,16 @@ def main():
     print(f"Network environment: {environment}")
     print(f"Simulating {num_devices:,} devices")
     
-    # Setup devices and configurations
-    global devices, device_optics, device_l3
-    devices = setup_network_devices(environment, num_devices)
-    device_optics = generate_device_optics(devices, environment)
-    device_l3 = generate_device_l3_config(devices, environment)
-    
     # Generate data
-    syslog_df = generate_syslog_data(num_events, start_date, end_date)
+    syslog_events = generate_syslog_data(num_events, start_date, end_date)
     
     # Save to parquet
-    syslog_df.to_parquet(output_file, index=False)
+    write_to_parquet(syslog_events, output_file)
     
-    print(f"Generated {len(syslog_df):,} Syslog events and saved to {output_file}")
+    print(f"Generated {len(syslog_events):,} Syslog events and saved to {output_file}")
     print(f"Data range: {start_date} to {end_date}")
-    print(f"Unique devices: {syslog_df['device'].nunique()}")
-    print(f"Vendors: {', '.join(syslog_df['vendor'].unique())}")
+    print(f"Unique devices: {len(set(event['device_name'] for event in syslog_events))}")
+    print(f"Vendors: {', '.join(set(event['vendor'] for event in syslog_events))}")
     
 if __name__ == "__main__":
     main() 

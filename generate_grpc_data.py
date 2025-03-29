@@ -592,102 +592,56 @@ def generate_tcam_data(devices, environment):
     return all_tcam_data
 
 def format_grpc_message(device, data_type, data, timestamp):
-    """Format data according to vendor's gRPC structure"""
-    # Select vendor subscription path
-    subscription_path = VENDOR_PATHS.get(device['vendor'], {}).get(data_type, "unknown")
+    """Format gRPC message in vendor-specific structure"""
+    vendor = device['vendor']
     
-    # Base message structure
-    message = {
-        "timestamp": timestamp,
-        "device_ip": device['ip'],
-        "device_name": device['name'],
-        "vendor": device['vendor'],
-        "data_type": data_type,
-        "subscription_path": subscription_path,
-        # Ensure raw_data is always a string (JSON format)
-        "raw_data": None,
-        
-        # TCAM fields
-        "tcam_resource": None,
-        "tcam_capacity": None,
-        "tcam_used": None,
-        "tcam_utilization": None,
-        
-        # VRF/routing fields
-        "vrf_name": None,
-        "route_count": None,
-        "bgp_routes": None,
-        "ospf_routes": None,
-        "ecmp_groups": None,
-        "ecmp_routes": None,
-        
-        # Interface fields
-        "interface": None,
-        "qos_enabled": None,
-        "congestion_drops": None,
-        
-        # FIB fields
-        "fib_synced": None,
-        "fib_size": None,
-        
-        # MPLS fields
-        "mpls_service": None,
-        "label_count": None,
-        "tunnels": None,
-        "tunnels_up": None,
-        
-        # QoS fields
-        "max_queue_depth": None,
-        "max_queue_drops": None
+    # Generate a general structure for all messages
+    grpc_message = {
+        'timestamp': timestamp,
+        'device_ip': device['ip'],
+        'device_name': device['name'],
+        'vendor': vendor,
+        'data_type': data_type,
+        'path': VENDOR_PATHS[vendor][data_type],
     }
     
-    # Populate with specific data
-    if data_type == 'tcam':
-        message["tcam_resource"] = data.get('tcam_resource')
-        message["tcam_capacity"] = data.get('tcam_capacity')
-        message["tcam_used"] = data.get('tcam_used')
-        message["tcam_utilization"] = data.get('tcam_utilization')
+    # Add module_id if this is interface/optical module related data
+    if data_type in ['qos', 'congestion'] and 'module_id' in data:
+        grpc_message['module_id'] = data['module_id']
+    elif data_type in ['qos', 'congestion'] and 'optical_vendor' in data and data['optical_vendor']:
+        # 如果没有module_id但有optical信息，创建一个标准格式的module_id
+        optical_vendor = data['optical_vendor']
+        datacenter = choice(DATACENTERS)
+        pod = choice(PODS)
+        rack = choice(RACKS)
+        interface = data.get('interface', f"Eth{randint(1,8)}/{randint(1,48)}")
+        speed = data.get('if_speed', choice(SPEEDS))
+        
+        grpc_message['module_id'] = f"{optical_vendor}-{datacenter}-{pod}-{rack}-{device['name']}-{interface}-{speed}"
     
-    elif data_type in ['route_table', 'ecmp', 'fib']:
-        message["vrf_name"] = data.get('vrf_name')
-        message["route_count"] = data.get('route_count')
-        message["bgp_routes"] = data.get('bgp_routes')
-        message["ospf_routes"] = data.get('ospf_routes')
-        message["ecmp_groups"] = data.get('ecmp_groups')
-        message["ecmp_routes"] = data.get('ecmp_routes')
+    # Format the content based on vendor and data type
+    if vendor == 'Cisco':
+        content = format_cisco_data(data_type, data)
+    elif vendor == 'Juniper':
+        content = format_juniper_data(data_type, data)
+    elif vendor == 'Arista':
+        content = format_arista_data(data_type, data)
+    elif vendor == 'Huawei':
+        content = format_huawei_data(data_type, data)
+    elif vendor == 'Dell':
+        content = format_dell_data(data_type, data)
+    elif vendor in ['Broadcom Sonic', 'Community Sonic']:
+        content = format_openconfig_data(data_type, data)
+    else:
+        content = {}
     
-    elif data_type in ['qos', 'congestion']:
-        message["interface"] = data.get('interface')
-        message["qos_enabled"] = data.get('qos_enabled')
-        message["congestion_drops"] = data.get('congestion_drops')
-        message["max_queue_depth"] = data.get('max_queue_depth')
-        message["max_queue_drops"] = data.get('max_queue_drops')
+    # 确保content是字符串类型，不是字典
+    if isinstance(content, dict):
+        grpc_message['content'] = json.dumps(content)
+    else:
+        grpc_message['content'] = content
     
-    elif data_type == 'mpls':
-        message["mpls_service"] = data.get('mpls_service')
-        message["label_count"] = data.get('label_count')
-        message["tunnels"] = data.get('tunnels')
-        message["tunnels_up"] = data.get('tunnels_up')
-    
-    # Format raw data according to vendor
-    if device['vendor'] == 'Cisco':
-        message["raw_data"] = format_cisco_data(data_type, data)
-    elif device['vendor'] == 'Juniper':
-        message["raw_data"] = format_juniper_data(data_type, data)
-    elif device['vendor'] == 'Arista':
-        message["raw_data"] = format_arista_data(data_type, data)
-    elif device['vendor'] == 'Huawei':
-        message["raw_data"] = format_huawei_data(data_type, data)
-    elif device['vendor'] == 'Dell':
-        message["raw_data"] = format_dell_data(data_type, data)
-    elif device['vendor'] in ['Broadcom Sonic', 'Community Sonic']:
-        message["raw_data"] = format_openconfig_data(data_type, data)
-    
-    # 确保raw_data总是字符串类型
-    if not isinstance(message["raw_data"], str):
-        message["raw_data"] = json.dumps({"error": "Failed to format data"})
-    
-    return message
+    return grpc_message
 
 def format_cisco_data(data_type, data):
     """Format data according to Cisco IOS-XR schemas for gRPC"""
