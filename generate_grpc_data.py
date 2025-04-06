@@ -592,56 +592,116 @@ def generate_tcam_data(devices, environment):
     return all_tcam_data
 
 def format_grpc_message(device, data_type, data, timestamp):
-    """Format gRPC message in vendor-specific structure"""
-    vendor = device['vendor']
-    
-    # Generate a general structure for all messages
-    grpc_message = {
-        'timestamp': timestamp,
-        'device_ip': device['ip'],
-        'device_name': device['name'],
-        'vendor': vendor,
-        'data_type': data_type,
-        'path': VENDOR_PATHS[vendor][data_type],
+    """Format a gRPC message with vendor-specific data"""
+    # Generic message structure
+    # Check if timestamp is already a string
+    if isinstance(timestamp, str):
+        timestamp_str = timestamp
+    else:
+        timestamp_str = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        
+    message = {
+        "timestamp": timestamp_str,
+        "device_hostname": device['name'],
+        "device_ip": device['ip'],
+        "device_vendor": device['vendor'],
+        "datacenter": data.get('datacenter', choice(DATACENTERS)),
+        "room": data.get('room', choice(PODS)),
+        "rack": data.get('rack', choice(RACKS)),
     }
     
-    # Add module_id if this is interface/optical module related data
-    if data_type in ['qos', 'congestion'] and 'module_id' in data:
-        grpc_message['module_id'] = data['module_id']
-    elif data_type in ['qos', 'congestion'] and 'optical_vendor' in data and data['optical_vendor']:
-        # 如果没有module_id但有optical信息，创建一个标准格式的module_id
-        optical_vendor = data['optical_vendor']
-        datacenter = choice(DATACENTERS)
-        pod = choice(PODS)
-        rack = choice(RACKS)
-        interface = data.get('interface', f"Eth{randint(1,8)}/{randint(1,48)}")
-        speed = data.get('if_speed', choice(SPEEDS))
-        
-        grpc_message['module_id'] = f"{optical_vendor}-{datacenter}-{pod}-{rack}-{device['name']}-{interface}-{speed}"
-    
-    # Format the content based on vendor and data type
-    if vendor == 'Cisco':
-        content = format_cisco_data(data_type, data)
-    elif vendor == 'Juniper':
-        content = format_juniper_data(data_type, data)
-    elif vendor == 'Arista':
-        content = format_arista_data(data_type, data)
-    elif vendor == 'Huawei':
-        content = format_huawei_data(data_type, data)
-    elif vendor == 'Dell':
-        content = format_dell_data(data_type, data)
-    elif vendor in ['Broadcom Sonic', 'Community Sonic']:
-        content = format_openconfig_data(data_type, data)
+    # Add interface details if they exist in the data
+    if 'interface' in data:
+        message['interface'] = data['interface']
+        # Create module_id following the standard format when interface is present
+        if data.get('optic_vendor') and data.get('speed'):
+            message['module_id'] = f"{data['optic_vendor']}-{message['datacenter']}-{message['room']}-{message['rack']}-{device['name']}-{data['interface']}-{data['speed']}"
+            message['speed'] = data['speed']
+            # Include optic_vendor as vendor in the output
+            message['optic_vendor'] = data['optic_vendor']
     else:
-        content = {}
+        message['interface'] = ''
+        message['module_id'] = ''
+        # Include default speed field
+        message['speed'] = data.get('speed', '')
     
-    # 确保content是字符串类型，不是字典
-    if isinstance(content, dict):
-        grpc_message['content'] = json.dumps(content)
+    # Add specific fields for QoS data
+    if data_type == 'qos':
+        # Ensure we have an interface and create a module_id if one does not exist
+        if 'interface' in data and not message.get('module_id'):
+            optic_vendor = choice(OPTICAL_VENDORS)
+            speed = data.get('speed', choice(SPEEDS))
+            message['module_id'] = f"{optic_vendor}-{message['datacenter']}-{message['room']}-{message['rack']}-{device['name']}-{data['interface']}-{speed}"
+            message['optic_vendor'] = optic_vendor
+            message['speed'] = speed
+    
+    # Add specific fields for congestion data
+    if data_type == 'congestion':
+        # Ensure we have an interface and create a module_id if one does not exist
+        if 'interface' in data and not message.get('module_id'):
+            optic_vendor = choice(OPTICAL_VENDORS)
+            speed = data.get('speed', choice(SPEEDS))
+            message['module_id'] = f"{optic_vendor}-{message['datacenter']}-{message['room']}-{message['rack']}-{device['name']}-{data['interface']}-{speed}"
+            message['optic_vendor'] = optic_vendor
+            message['speed'] = speed
+    
+    # Add vendor-specific data format
+    if device['vendor'] == 'Cisco':
+        message["content"] = json.dumps(format_cisco_data(data_type, data))
+    elif device['vendor'] == 'Juniper':
+        message["content"] = json.dumps(format_juniper_data(data_type, data))
+    elif device['vendor'] == 'Arista':
+        message["content"] = json.dumps(format_arista_data(data_type, data))
+    elif device['vendor'] == 'Huawei':
+        message["content"] = json.dumps(format_huawei_data(data_type, data))
+    elif device['vendor'] == 'Dell':
+        message["content"] = json.dumps(format_dell_data(data_type, data))
     else:
-        grpc_message['content'] = content
+        message["content"] = json.dumps(format_openconfig_data(data_type, data))
     
-    return grpc_message
+    # Add calculated admin_status and oper_status based on existing data
+    if 'status' in data:
+        message['admin_status'] = data.get('admin_status', 'up' if data['status'] else 'down')
+        message['oper_status'] = data.get('oper_status', 'up' if data['status'] else 'down')
+    else:
+        message['admin_status'] = data.get('admin_status', '')
+        message['oper_status'] = data.get('oper_status', '')
+    
+    # Handle interface-specific metrics
+    if data_type in ['interface', 'ethernet']:
+        message.update({
+            "mtu": data.get('mtu', 1500),
+            "duplex": data.get('duplex', 'full'),
+            "rx_bytes": data.get('rx_bytes', 0),
+            "tx_bytes": data.get('tx_bytes', 0),
+            "rx_packets": data.get('rx_packets', 0),
+            "tx_packets": data.get('tx_packets', 0),
+            "rx_dropped": data.get('rx_dropped', 0),
+            "tx_dropped": data.get('tx_dropped', 0),
+            "rx_errors": data.get('rx_errors', 0),
+            "tx_errors": data.get('tx_errors', 0),
+            "crc_errors": data.get('crc_errors', 0),
+            "fcs_errors": data.get('fcs_errors', 0),
+            "flap_count": data.get('flap_count', 0)
+        })
+    
+    # Handle optical module metrics
+    if data_type in ['optical', 'transceiver'] or 'optic_' in data_type:
+        message.update({
+            "temperature": data.get('temperature', 0.0),
+            "voltage": data.get('voltage', 0.0),
+            "current": data.get('current', 0.0),
+            "tx_power": data.get('tx_power', 0.0),
+            "rx_power": data.get('rx_power', 0.0),
+            "optic_type": data.get('optic_type', ''),
+            "optic_serial": data.get('optic_serial', '')
+        })
+    
+    # Handle data type
+    message["data_type"] = data_type
+    message["data_path"] = VENDOR_PATHS.get(device['vendor'], {}).get(data_type, '')
+    
+    return message
 
 def format_cisco_data(data_type, data):
     """Format data according to Cisco IOS-XR schemas for gRPC"""
@@ -1386,7 +1446,7 @@ def main():
         print(f"Generated {len(samples):,} gRPC/gNMI subscription samples and saved to {output_file}")
         print(f"Data range: {start_date} to {end_date}")
         print(f"Unique devices: {df['device_ip'].nunique()}")
-        print(f"Vendors: {', '.join(df['vendor'].unique())}")
+        print(f"Vendors: {', '.join(df['device_vendor'].unique())}")
         print(f"Data types: {', '.join(df['data_type'].unique())}")
         print(f"Fields included: {len(df.columns)}")
     else:

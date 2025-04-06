@@ -200,215 +200,182 @@ def generate_interfaces(devices, environment):
                 in_discards = randint(1, 100)
                 out_discards = randint(1, 100)
             
-            # Last change timestamp
-            last_change = randint(0, device['sys_uptime'])
-            
-            # Interface index and description
-            if_index = i
-            if_descr = if_name
-            
-            # Create interface record
-            interface = {
+            # Create a dictionary with all the interface information
+            interface_info = {
                 'device_ip': device['ip'],
-                'device_name': device['name'],
-                'vendor': device['vendor'],
-                'if_index': if_index,
-                'if_name': if_name,
-                'if_descr': if_descr,
-                'if_alias': if_alias,
-                'if_type': if_type,
-                'if_mtu': if_mtu,
-                'if_speed': if_speed,
-                'if_speed_bps': speed_bps,
-                'if_admin_status': admin_status,
-                'if_oper_status': oper_status,
-                'if_last_change': last_change,
+                'device_hostname': device['name'],
+                'device_vendor': device['vendor'],
+                'interface': if_name,
+                'speed': if_speed,
+                'datacenter': datacenter if optical_present else choice(DATACENTERS),
+                'room': pod if optical_present else choice(PODS),
+                'rack': rack if optical_present else choice(RACKS),
                 'module_id': module_id,
-                'optical_vendor': optical_vendor,
-                'optical_serial': optical_serial,
-                'optical_part': optical_part,
-                'temp': temp,
-                'voltage': voltage,
-                'tx_bias': tx_bias,
-                'tx_power': tx_power,
-                'rx_power': rx_power,
-                'in_octets': in_octets,
-                'out_octets': out_octets,
-                'in_packets': in_packets,
-                'out_packets': out_packets,
-                'in_errors': in_errors,
-                'out_errors': out_errors,
-                'in_discards': in_discards,
-                'out_discards': out_discards,
-                'oid_prefix': device['oid_prefix']
+                'optic_vendor': optical_vendor,
+                'optic_serial': optical_serial,
+                'optic_part': optical_part,
+                'ifIndex': randint(1, 256),
+                'ifDescr': if_name,
+                'ifAlias': if_alias,
+                'ifType': if_type,
+                'ifMtu': if_mtu,
+                'ifSpeed': speed_bps,
+                'ifAdminStatus': admin_status,
+                'ifOperStatus': oper_status,
+                'ifLastChange': randint(1, 2000000),
+                'ifHCInOctets': in_octets,
+                'ifHCOutOctets': out_octets,
+                'ifInUcastPkts': in_packets,
+                'ifOutUcastPkts': out_packets,
+                'ifInErrors': in_errors,
+                'ifOutErrors': out_errors,
+                'ifInDiscards': in_discards,
+                'ifOutDiscards': out_discards,
+                'ifInBroadcastPkts': randint(100, 10000),
+                'ifOutBroadcastPkts': randint(100, 10000),
+                'ifInMulticastPkts': randint(100, 10000),
+                'ifOutMulticastPkts': randint(100, 10000),
+                'opticalTemp': temp,
+                'opticalVoltage': voltage,
+                'opticalTxBias': tx_bias,
+                'opticalTxPower': tx_power,
+                'opticalRxPower': rx_power
             }
             
-            all_interfaces.append(interface)
+            all_interfaces.append(interface_info)
     
     return all_interfaces
 
 def generate_snmp_data(devices, interfaces, num_samples, start_date, end_date):
-    """Generate SNMP samples over time for devices and interfaces"""
-    # Convert dates to timestamps
-    start_timestamp = datetime.strptime(start_date, "%Y-%m-%d").timestamp()
-    end_timestamp = datetime.strptime(end_date, "%Y-%m-%d").timestamp()
+    """Generate time-series SNMP data based on devices and interfaces"""
+    # Calculate timestamps
+    if isinstance(start_date, str):
+        start_date = datetime.strptime(start_date, '%Y-%m-%d')
+    if isinstance(end_date, str):
+        end_date = datetime.strptime(end_date, '%Y-%m-%d')
     
-    # Calculate time interval between samples
-    time_range = end_timestamp - start_timestamp
-    interval = time_range / num_samples
+    time_range = (end_date - start_date).total_seconds()
     
-    snmp_samples = []
+    # Create an empty list to hold all the SNMP data
+    all_snmp_data = []
     
-    # For each time sample
-    for i in range(num_samples):
-        # Calculate timestamp for this sample
-        event_time = start_timestamp + interval * i
-        event_datetime = datetime.fromtimestamp(event_time)
-        formatted_timestamp = event_datetime.strftime("%Y-%m-%d %H:%M:%S")
+    # Interface samples
+    interface_samples = interfaces * (num_samples // len(interfaces) + 1)
+    interface_samples = interface_samples[:num_samples]
+    
+    # Randomize timestamps
+    for i, interface in enumerate(interface_samples):
+        # Create a randomized timestamp in the specified range
+        random_second = random.randint(0, int(time_range))
+        timestamp = start_date + timedelta(seconds=random_second)
+        timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
         
-        # Select random device and interface
-        device = random.choice(devices)
-        interface = random.choice([intf for intf in interfaces if intf['device_ip'] == device['ip']])
+        # Create a copy of the interface information
+        snmp_data = interface.copy()
         
-        # Update dynamic values
-        # Device metrics
-        device_updated = device.copy()
-        device_updated['sys_uptime'] = device['sys_uptime'] + int(i * interval)
-        device_updated['cpu_5s'] = min(100, max(1, device['cpu_5s'] + randint(-10, 10)))
-        device_updated['cpu_1m'] = min(100, max(1, device['cpu_1m'] + randint(-5, 5)))
-        device_updated['cpu_5m'] = min(100, max(1, device['cpu_5m'] + randint(-3, 3)))
+        # Add the timestamp
+        snmp_data['timestamp'] = timestamp_str
         
-        # Memory usage varies slowly
-        memory_fluctuation = uniform(0.9, 1.1)
-        device_updated['memory_used'] = min(device_updated['memory_total'], 
-                                          int(device['memory_used'] * memory_fluctuation))
-        
-        # Interface metrics
-        interface_updated = interface.copy()
-        
-        # Always increase traffic metrics regardless of interface status
-        # For active interfaces, increase more dramatically
-        if interface['if_oper_status'] == 'up':
-            traffic_multiplier = 1 + (i / num_samples) * uniform(0.8, 1.2)
+        # Randomize interface counters to simulate traffic changes
+        if snmp_data['ifOperStatus'] == 'up':
+            delta_in = randint(1000, 1000000)
+            delta_out = randint(1000, 1000000)
+            delta_pkts_in = randint(10, 10000)
+            delta_pkts_out = randint(10, 10000)
             
-            interface_updated['in_octets'] = max(1000, int(interface['in_octets'] * traffic_multiplier))
-            interface_updated['out_octets'] = max(1000, int(interface['out_octets'] * traffic_multiplier))
-            interface_updated['in_packets'] = max(1000, int(interface['in_packets'] * traffic_multiplier))
-            interface_updated['out_packets'] = max(1000, int(interface['out_packets'] * traffic_multiplier))
+            # Update counters
+            snmp_data['ifHCInOctets'] += delta_in
+            snmp_data['ifHCOutOctets'] += delta_out
+            snmp_data['ifInUcastPkts'] += delta_pkts_in
+            snmp_data['ifOutUcastPkts'] += delta_pkts_out
             
-            # Errors and discards may increase slightly but always non-zero
-            interface_updated['in_errors'] = max(1, interface['in_errors'] + randint(0, 2))
-            interface_updated['out_errors'] = max(1, interface['out_errors'] + randint(0, 2))
-            interface_updated['in_discards'] = max(1, interface['in_discards'] + randint(0, 5))
-            interface_updated['out_discards'] = max(1, interface['out_discards'] + randint(0, 5))
-        else:
-            # For inactive interfaces, keep the values relatively stable
-            interface_updated['in_octets'] = max(1000, interface['in_octets'])
-            interface_updated['out_octets'] = max(1000, interface['out_octets'])
-            interface_updated['in_packets'] = max(1000, interface['in_packets'])
-            interface_updated['out_packets'] = max(1000, interface['out_packets'])
-            interface_updated['in_errors'] = max(1, interface['in_errors'])
-            interface_updated['out_errors'] = max(1, interface['out_errors'])
-            interface_updated['in_discards'] = max(1, interface['in_discards'])
-            interface_updated['out_discards'] = max(1, interface['out_discards'])
+            # Small chance of errors
+            if random.random() < 0.1:
+                snmp_data['ifInErrors'] += randint(0, 5)
+            if random.random() < 0.1:
+                snmp_data['ifOutErrors'] += randint(0, 5)
+            if random.random() < 0.1:
+                snmp_data['ifInDiscards'] += randint(0, 10)
+            if random.random() < 0.1:
+                snmp_data['ifOutDiscards'] += randint(0, 10)
         
-        # Optical parameters fluctuate according to updated requirements
-        if interface['optical_vendor']:
-            # Use consistent ranges with optical module values from generate_ddm
-            interface_updated['temp'] = max(10.0, min(90.0, interface['temp'] + uniform(-2, 2)))
-            interface_updated['voltage'] = max(2.33, min(4.32, interface['voltage'] + uniform(-0.05, 0.05)))
-            interface_updated['tx_bias'] = max(10.0, min(80.0, interface['tx_bias'] + uniform(-1, 1)))
-            interface_updated['tx_power'] = min(2.0, max(-7.0, interface['tx_power'] + uniform(-0.2, 0.2)))
-            interface_updated['rx_power'] = min(1.0, max(-10.0, interface['rx_power'] + uniform(-0.5, 0.5)))
-        else:
-            # Even if no optical module present, provide realistic values
-            interface_updated['temp'] = uniform(10.0, 90.0)
-            interface_updated['voltage'] = uniform(2.33, 4.32)
-            interface_updated['tx_bias'] = uniform(10.0, 80.0)
-            interface_updated['tx_power'] = uniform(-7.0, -5.0)
-            interface_updated['rx_power'] = uniform(-10.0, -8.0)
+        # Update optical module values
+        if snmp_data.get('module_id'):
+            # Small random changes in optics measurements
+            snmp_data['opticalTemp'] += uniform(-1.0, 1.0)
+            snmp_data['opticalVoltage'] += uniform(-0.01, 0.01)
+            snmp_data['opticalTxBias'] += uniform(-0.5, 0.5)
+            snmp_data['opticalTxPower'] += uniform(-0.1, 0.1)
+            snmp_data['opticalRxPower'] += uniform(-0.2, 0.2)
+            
+            # Enforce reasonable ranges
+            snmp_data['opticalTemp'] = max(10.0, min(90.0, snmp_data['opticalTemp']))
+            snmp_data['opticalVoltage'] = max(2.33, min(4.32, snmp_data['opticalVoltage']))
+            snmp_data['opticalTxBias'] = max(5.0, min(85.0, snmp_data['opticalTxBias']))
+            snmp_data['opticalTxPower'] = max(-7.0, min(3.0, snmp_data['opticalTxPower']))
+            snmp_data['opticalRxPower'] = max(-12.0, min(2.0, snmp_data['opticalRxPower']))
         
-        # Combine device and interface info in one sample record
-        sample = {
-            'timestamp': formatted_timestamp,
-            'device_ip': device['ip'],
-            'device_name': device['name'],
-            'vendor': device['vendor'],
-            'sys_descr': device['sys_descr'],
-            'sys_uptime': device_updated['sys_uptime'],
-            'sys_contact': device['sys_contact'],
-            'sys_name': device['sys_name'],
-            'sys_location': device['sys_location'],
-            'cpu_5s': device_updated['cpu_5s'],
-            'cpu_1m': device_updated['cpu_1m'],
-            'cpu_5m': device_updated['cpu_5m'],
-            'memory_used': device_updated['memory_used'],
-            'memory_total': device['memory_total'],
-            'if_index': interface['if_index'],
-            'if_name': interface['if_name'],
-            'if_descr': interface['if_descr'],
-            'if_alias': interface['if_alias'],
-            'if_type': interface['if_type'],
-            'if_mtu': interface['if_mtu'],
-            'if_speed': interface['if_speed'],
-            'if_speed_bps': interface['if_speed_bps'],
-            'if_admin_status': interface['if_admin_status'],
-            'if_oper_status': interface['if_oper_status'],
-            'if_last_change': interface['if_last_change'],
-            'module_id': interface['module_id'],
-            'optical_vendor': interface['optical_vendor'],
-            'optical_serial': interface['optical_serial'],
-            'optical_part': interface['optical_part'],
-            'temp': interface_updated['temp'],
-            'voltage': interface_updated['voltage'],
-            'tx_bias': interface_updated['tx_bias'],
-            'tx_power': interface_updated['tx_power'],
-            'rx_power': interface_updated['rx_power'],
-            'in_octets': interface_updated['in_octets'],
-            'out_octets': interface_updated['out_octets'],
-            'in_packets': interface_updated['in_packets'],
-            'out_packets': interface_updated['out_packets'],
-            'in_errors': interface_updated['in_errors'],
-            'out_errors': interface_updated['out_errors'],
-            'in_discards': interface_updated['in_discards'],
-            'out_discards': interface_updated['out_discards'],
-            'oid_prefix': interface['oid_prefix']
-        }
-        
-        snmp_samples.append(sample)
+        all_snmp_data.append(snmp_data)
     
-    return pd.DataFrame(snmp_samples)
+    # Convert to DataFrame and save to Parquet
+    df = pd.DataFrame(all_snmp_data)
+    
+    # Ensure we have all required fields based on the new data structure
+    if 'module_id' not in df.columns:
+        df['module_id'] = ''
+    if 'datacenter' not in df.columns:
+        df['datacenter'] = [choice(DATACENTERS) for _ in range(len(df))]
+    if 'room' not in df.columns:
+        df['room'] = [choice(PODS) for _ in range(len(df))]
+    if 'rack' not in df.columns:
+        df['rack'] = [choice(RACKS) for _ in range(len(df))]
+    if 'device_hostname' not in df.columns:
+        df['device_hostname'] = df['device_name']
+    if 'device_vendor' not in df.columns:
+        df['device_vendor'] = df['vendor']
+    
+    # Rename columns to match the new data structure if needed
+    column_mapping = {
+        'vendor': 'device_vendor',
+        'device_name': 'device_hostname',
+        'opticalTemp': 'temperature',
+        'opticalVoltage': 'voltage',
+        'opticalTxBias': 'bias_current',
+        'opticalTxPower': 'tx_power',
+        'opticalRxPower': 'rx_power',
+    }
+    
+    df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
+    
+    return df
 
 def main():
-    # Add argument parsing
-    parser = argparse.ArgumentParser(description='Generate synthetic SNMP data for network devices')
-    parser.add_argument('--count', type=int, default=1000000, help='Number of SNMP samples to generate (default: 1,000,000)')
-    parser.add_argument('--devices', type=int, default=100, help='Number of network devices to simulate (default: 100)')
-    parser.add_argument('--start-date', type=str, default="2025-02-01", help='Start date in YYYY-MM-DD format (default: 2025-02-01)')
-    parser.add_argument('--end-date', type=str, default="2025-03-01", help='End date in YYYY-MM-DD format (default: 2025-03-01)')
-    parser.add_argument('--output', type=str, default="network_snmp_data.parquet", help='Output filename (default: network_snmp_data.parquet)')
-    parser.add_argument('--environment', type=str, choices=['datacenter', 'enterprise', 'isp', 'campus'], default='datacenter',
-                       help='Network environment to simulate (default: datacenter)')
-    
+    parser = argparse.ArgumentParser(description='Generate SNMP data for network devices')
+    parser.add_argument('--count', type=int, default=10000, help='Number of SNMP samples to generate')
+    parser.add_argument('--devices', type=int, default=100, help='Number of network devices to simulate')
+    parser.add_argument('--start', type=str, default='2025-02-01', help='Start date (YYYY-MM-DD)')
+    parser.add_argument('--end', type=str, default='2025-03-01', help='End date (YYYY-MM-DD)')
+    parser.add_argument('--output', type=str, default='snmp_data.parquet', help='Output file name')
+    parser.add_argument('--environment', type=str, choices=['datacenter', 'enterprise', 'isp', 'campus'], 
+                       default='datacenter', help='Network environment to simulate')
     args = parser.parse_args()
     
-    # Parameters from arguments
     num_samples = args.count
-    num_devices = min(args.devices, 1000)  # Limit to reasonable number
-    start_date = args.start_date
-    end_date = args.end_date
+    num_devices = args.devices
+    start_date = args.start
+    end_date = args.end
     output_file = args.output
     environment = args.environment
     
-    print(f"Generating {num_samples:,} SNMP samples from {start_date} to {end_date}...")
+    print(f"Generating {num_samples} SNMP samples from {start_date} to {end_date}...")
     print(f"Network environment: {environment}")
-    print(f"Simulating {num_devices:,} devices")
+    print(f"Simulating {num_devices} devices")
     
-    # Generate device information
+    # Generate device configurations
     devices = setup_network_devices(environment, num_devices)
     print(f"Generated {len(devices)} device configurations")
     
-    # Generate interface information
+    # Generate interface configurations
     interfaces = generate_interfaces(devices, environment)
     print(f"Generated {len(interfaces)} interfaces")
     
@@ -416,12 +383,13 @@ def main():
     snmp_df = generate_snmp_data(devices, interfaces, num_samples, start_date, end_date)
     
     # Save to parquet
-    snmp_df.to_parquet(output_file, index=False)
+    table = pa.Table.from_pandas(snmp_df)
+    pq.write_table(table, output_file)
     
-    print(f"Generated {len(snmp_df):,} SNMP samples and saved to {output_file}")
+    print(f"Generated {len(snmp_df)} SNMP samples and saved to {output_file}")
     print(f"Data range: {start_date} to {end_date}")
-    print(f"Unique devices: {snmp_df['device_name'].nunique()}")
-    print(f"Vendors: {', '.join(snmp_df['vendor'].unique())}")
+    print(f"Unique devices: {snmp_df['device_hostname'].nunique()}")
+    print(f"Unique interfaces: {snmp_df['interface'].nunique()}")
     print(f"Fields included: {len(snmp_df.columns)}")
     
 if __name__ == "__main__":

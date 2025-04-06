@@ -4,6 +4,7 @@ import argparse
 from datetime import datetime, timedelta
 import pyarrow as pa
 import pyarrow.parquet as pq
+import json
 
 # 常量定义
 OPTICAL_VENDORS = ['Innolight', 'Luxshare', 'Finisar', 'HGTECH', 'Eoptolink', 'Accelink']
@@ -47,22 +48,55 @@ def generate_prediction(count=1000000, output="predict_data.parquet", start_date
         # 预测日期基于时间戳计算
         predicted_date = (timestamp + timedelta(days=remaining_days)).strftime("%Y-%m-%d")
         
+        # 生成一个随机的AI模型名称
+        model_name = random.choice(["ARIMA+IF", "LSTM", "GRU", "Prophet", "XGBoost", "RandomForest", "Ensemble"])
+        
+        # 随机生成命中的规则
+        hit_rules = []
+        rule_count = random.randint(0, 3)
+        possible_rules = [
+            "温度波动异常", "功率下降过快", "电压不稳定", "偏差超阈值", 
+            "历史故障模式", "厂商批次问题", "接口错误增加", "链路抖动频繁"
+        ]
+        if rule_count > 0:
+            hit_rules = random.sample(possible_rules, rule_count)
+        
         rows.append({
             "timestamp": timestamp_str,
             "module_id": module_id,
-            "vendor": vendor,
+            "optic_vendor": vendor,
+            "device_vendor": random.choice(["Cisco", "Huawei", "Juniper", "Arista"]),
             "speed": speed,
             "datacenter": datacenter,
-            "pod": pod,
+            "room": pod,
             "rack": rack,
-            "device": device,
+            "device_hostname": device,
+            "device_ip": f"10.{random.randint(1,255)}.{random.randint(1,255)}.{random.randint(1,255)}",
             "interface": interface,
-            "predicted_remaining_days": remaining_days,
+            "remaining_days": remaining_days,
             "failure_probability": failure_prob,
-            "predicted_date": predicted_date
+            "failure_time_estimate": predicted_date,
+            "model_name": model_name,
+            "hit_rules": json.dumps(hit_rules, ensure_ascii=False)
         })
 
     df = pd.DataFrame(rows)
+    
+    # Ensure all required columns are present according to the schema
+    required_fields = [
+        'timestamp', 'module_id', 'datacenter', 'room', 'rack', 'device_hostname', 
+        'device_ip', 'device_vendor', 'interface', 'speed', 'optic_vendor', 
+        'failure_probability', 'failure_time_estimate', 'remaining_days', 'model_name', 'hit_rules'
+    ]
+    
+    for field in required_fields:
+        if field not in df.columns:
+            if field in ['datacenter', 'room', 'rack']:
+                df[field] = [random.choice(DATACENTERS if field == 'datacenter' else 
+                                       PODS if field == 'room' else RACKS) for _ in range(len(df))]
+            else:
+                df[field] = ''
+    
     table = pa.Table.from_pandas(df)
     pq.write_table(table, output)
     

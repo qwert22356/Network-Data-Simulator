@@ -30,18 +30,22 @@ def inject_fault_modules(module_ids, base_time):
             injected.append({
                 "timestamp": (base_time + timedelta(minutes=offset)).strftime("%Y-%m-%d %H:%M:%S"),
                 "module_id": module_id,
-                "vendor": vendor,
+                "optic_vendor": vendor,
+                "device_vendor": random.choice(["Cisco", "Huawei", "Juniper", "Arista"]),
                 "speed": speed,
                 "temperature": round(random.uniform(80.0, 85.0), 2),
                 "voltage": round(random.uniform(3.0, 3.15), 2),
-                "bias_current": round(random.uniform(0.0, 5.0), 2),
+                "current": round(random.uniform(0.0, 5.0), 2),
                 "tx_power": round(random.uniform(-7.0, -5.0), 2),
                 "rx_power": round(random.uniform(-10.0, -8.0), 2),
                 "datacenter": datacenter,
-                "pod": pod,
+                "room": pod,
                 "rack": rack,
-                "device": device,
-                "interface": interface
+                "device_hostname": device,
+                "device_ip": f"10.{random.randint(1,255)}.{random.randint(1,255)}.{random.randint(1,255)}",
+                "interface": interface,
+                "optic_type": f"{speed}-{random.choice(['SR', 'LR', 'PSM4', 'CWDM4', 'LR4', 'SR4', 'AOC', 'DAC'])}",
+                "optic_serial": f"{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', k=8))}"
             })
     return injected
 
@@ -66,25 +70,46 @@ def generate_ddm(count=1000000, fault_ratio=0.01, output="ddm_fault.parquet"):
         ddm_list.append({
             "timestamp": (base_time + timedelta(minutes=random.randint(0, 10000))).strftime("%Y-%m-%d %H:%M:%S"),
             "module_id": module_id,
-            "vendor": vendor,
+            "optic_vendor": vendor,
+            "device_vendor": random.choice(["Cisco", "Huawei", "Juniper", "Arista"]),
             "speed": speed,
             "temperature": round(random.uniform(30, 70), 2),
             "voltage": round(random.uniform(3.2, 3.6), 2),
-            "bias_current": round(random.uniform(10, 80), 2),
+            "current": round(random.uniform(10, 80), 2),
             "tx_power": round(random.uniform(-2.0, 2.0), 2),
             "rx_power": round(random.uniform(-4.0, 1.0), 2),
             "datacenter": datacenter,
-            "pod": pod,
+            "room": pod,
             "rack": rack,
-            "device": device,
-            "interface": interface
+            "device_hostname": device,
+            "device_ip": f"10.{random.randint(1,255)}.{random.randint(1,255)}.{random.randint(1,255)}",
+            "interface": interface,
+            "optic_type": f"{speed}-{random.choice(['SR', 'LR', 'PSM4', 'CWDM4', 'LR4', 'SR4', 'AOC', 'DAC'])}",
+            "optic_serial": f"{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', k=8))}"
         })
 
     # 注入故障模块（默认1%）
     fault_sample = random.sample(module_ids, int(fault_ratio * count))
-    ddm_list.extend(inject_fault_modules(fault_sample, base_time))
+    if fault_sample:  # Make sure we have modules to inject faults into
+        ddm_list.extend(inject_fault_modules(fault_sample, base_time))
 
     df = pd.DataFrame(ddm_list)
+    
+    # Ensure all required columns are present according to the schema
+    required_fields = [
+        'timestamp', 'module_id', 'datacenter', 'room', 'rack', 'device_hostname', 
+        'device_ip', 'device_vendor', 'interface', 'speed', 'temperature', 'voltage', 
+        'current', 'tx_power', 'rx_power', 'optic_vendor', 'optic_type', 'optic_serial'
+    ]
+    
+    for field in required_fields:
+        if field not in df.columns:
+            if field in ['datacenter', 'room', 'rack']:
+                df[field] = [random.choice(DATACENTERS if field == 'datacenter' else 
+                                        PODS if field == 'room' else RACKS) for _ in range(len(df))]
+            else:
+                df[field] = ''
+    
     table = pa.Table.from_pandas(df)
     pq.write_table(table, output)
     

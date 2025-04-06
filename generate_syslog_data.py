@@ -8,6 +8,9 @@ import numpy as np
 from random import choice, randint, uniform, sample
 from datetime import datetime, timedelta
 import argparse
+import re
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 # Constants
 VENDORS = ['Cisco', 'Huawei', 'Juniper', 'Arista', 'Dell', 'Broadcom Sonic', 'Community Sonic']
@@ -201,480 +204,633 @@ def generate_optical_module_event():
     return choice(event_types)
 
 def generate_l3_protocol_event(protocol):
-    events = {
-        'OSPF': [
-            "Neighbor up",
-            "Neighbor down",
-            "Adjacency change",
-            "SPF calculation",
-            "Interface state change",
-            "Area border router change",
-            "Authentication failure",
-            "Packet received with bad checksum",
-            "Virtual link state change",
-            "DR/BDR election"
-        ],
-        'BGP': [
-            "Peer up",
-            "Peer down",
-            "Prefix limit exceeded",
-            "Route dampening",
-            "Path attribute error",
-            "Session reset",
-            "Hold timer expired",
-            "Authentication failure",
-            "Route flap",
-            "Notification received"
-        ],
-        'VXLAN': [
-            "VTEP discovery",
-            "VNI state change",
-            "Duplicate IP detected",
-            "ARP/ND suppression",
-            "Flood list change",
-            "Tunnel established",
-            "Tunnel down",
-            "MAC mobility detected",
-            "Unknown VNI",
-            "MTU issues"
-        ],
-        'MPLS': [
-            "LDP session up",
-            "LDP session down",
-            "Label allocation failure",
-            "LSP up",
-            "LSP down",
-            "Path switch",
-            "Label space exhausted",
-            "TTL expired in transit",
-            "RSVP reservation failure",
-            "Unreachable destination"
-        ],
-        'LLDP': [
-            "Neighbor added",
-            "Neighbor removed",
-            "Neighbor information changed",
-            "Chassid ID TLV missing",
-            "Port ID TLV missing",
-            "TTL expired",
-            "Unrecognized TLV received",
-            "Remote port shutdown",
-            "Remote system name change",
-            "Management address changed"
-        ],
-        'STP': [
-            "Topology change",
-            "Root bridge change",
-            "Port state change",
-            "BPDU guard triggered",
-            "Root guard triggered",
-            "Loop guard triggered",
-            "Bridge ID change",
-            "Path cost change",
-            "Multiple roots detected",
-            "Inconsistent port state"
-        ],
-        'LACP': [
-            "Port added to port-channel",
-            "Port removed from port-channel",
-            "Bundle up",
-            "Bundle down",
-            "Peer timeout",
-            "System ID changed",
-            "Port priority changed",
-            "Key mismatch",
-            "LACP rate changed",
-            "Individual/Aggregate state change"
-        ],
-        'PIM': [
-            "Neighbor up",
-            "Neighbor down",
-            "Join/Prune received",
-            "Assert received",
-            "Register stop received",
-            "RP changed",
-            "RPF change",
-            "Multicast state timeout",
-            "Bootstrap message received",
-            "DR election"
-        ],
-        'ISIS': [
-            "Adjacency up",
-            "Adjacency down",
-            "LSP received",
-            "LSP generated",
-            "DIS election",
-            "Area address mismatch",
-            "Authentication failure",
-            "LSP database overload",
-            "Circuit state change",
-            "SPF calculation"
-        ],
-        'VRRP': [
-            "State transition",
-            "Virtual IP conflict",
-            "Authentication failure",
-            "Advertisement timer expired",
-            "Priority zero received",
-            "Master down interval expired",
-            "Protocol error",
-            "Interface tracking state change",
-            "Master/Backup transition",
-            "Configuration error"
+    """Generate protocol event and message template for L3 protocols"""
+    if protocol == 'BGP':
+        events = [
+            ('neighbor-down', "BGP neighbor {neighbor} (AS {as_number}) state changed to DOWN: {reason}"),
+            ('neighbor-up', "BGP neighbor {neighbor} (AS {as_number}) state changed to ESTABLISHED"),
+            ('max-prefix-exceeded', "BGP neighbor {neighbor} (AS {as_number}) maximum prefix limit exceeded"),
+            ('route-flap', "BGP route {neighbor}/24 flapping detected"),
+            ('md5-auth-failure', "BGP MD5 authentication failure from {neighbor}"),
+            ('attribute-discard', "BGP UPDATE from {neighbor} (AS {as_number}) contained disallowed attribute"),
+            ('graceful-restart', "BGP neighbor {neighbor} (AS {as_number}) graceful restart initiated"),
+            ('admin-shutdown', "BGP neighbor {neighbor} (AS {as_number}) administratively shut down"),
+            ('route-refresh', "BGP route refresh requested from {neighbor} (AS {as_number})"),
+            ('peer-group-change', "BGP neighbor {neighbor} added to peer group")
         ]
-    }
-    return choice(events.get(protocol, ["State change"]))
-
-def generate_optical_module_message(device, optics_info):
-    """Generate a message related to an optical module"""
-    if not optics_info:
-        return ""
-
-    # Select a random optic from this device
-    optic = choice(optics_info)
-    
-    # Generate module_id if not already present
-    if 'module_id' not in optic:
-        optic['module_id'] = f"{optic['vendor']}-{optic['datacenter']}-{optic['pod']}-{optic['rack']}-{device}-{optic['port']}-{optic['speed']}"
+        event, template = choice(events)
+        return event, template
         
+    elif protocol == 'OSPF':
+        events = [
+            ('neighbor-down', "OSPF neighbor {neighbor} on interface {interface} is DOWN"),
+            ('neighbor-up', "OSPF neighbor {neighbor} on interface {interface} is FULL"),
+            ('area-change', "OSPF interface {interface} moved to area {area}"),
+            ('lsa-maxage', "OSPF LSA from {neighbor} has reached MaxAge"),
+            ('spf-start', "OSPF SPF calculation started for area {area}"),
+            ('spf-complete', "OSPF SPF calculation completed for area {area} in {reason} ms"),
+            ('mtu-mismatch', "OSPF MTU mismatch detected on {interface} with neighbor {neighbor}"),
+            ('authentication-failure', "OSPF authentication failure on {interface} from {neighbor}"),
+            ('dd-mismatch', "OSPF DD sequence number mismatch with {neighbor} on {interface}"),
+            ('config-change', "OSPF configuration changed for area {area}")
+        ]
+        event, template = choice(events)
+        return event, template
+        
+    elif protocol == 'VXLAN':
+        events = [
+            ('vni-up', "VXLAN VNI {vni} state is UP"),
+            ('vni-down', "VXLAN VNI {vni} state is DOWN: {reason}"),
+            ('flooding-enabled', "VXLAN head-end replication enabled for VNI {vni}"),
+            ('vtep-discovered', "VXLAN VTEP {neighbor} discovered for VNI {vni}"),
+            ('vtep-removed', "VXLAN VTEP {neighbor} removed from VNI {vni}"),
+            ('mac-move', "VXLAN MAC move detected for VNI {vni} from {neighbor} to {interface}"),
+            ('bgp-rt-import', "VXLAN BGP RT import for VNI {vni} changed"),
+            ('encap-error', "VXLAN encapsulation error for packet to {neighbor} on VNI {vni}"),
+            ('decap-error', "VXLAN decapsulation error from {neighbor} on VNI {vni}"),
+            ('mtu-exceeded', "VXLAN MTU exceeded on VNI {vni} from {neighbor}")
+        ]
+        event, template = choice(events)
+        return event, template
+        
+    elif protocol == 'MPLS':
+        events = [
+            ('ldp-neighbor-up', "MPLS LDP neighbor {neighbor} is UP"),
+            ('ldp-neighbor-down', "MPLS LDP neighbor {neighbor} is DOWN: {reason}"),
+            ('label-allocation', "MPLS label {label} allocated for {neighbor}/24"),
+            ('label-withdrawal', "MPLS label {label} withdrawn for {neighbor}/24"),
+            ('tunnel-up', "MPLS TE tunnel to {neighbor} is UP"),
+            ('tunnel-down', "MPLS TE tunnel to {neighbor} is DOWN: {reason}"),
+            ('rsvp-error', "MPLS RSVP error received from {neighbor} for LSP {label}"),
+            ('ldp-session-error', "MPLS LDP session error with {neighbor}"),
+            ('ttl-expired', "MPLS TTL expired for packet from {neighbor} with label {label}"),
+            ('php-enabled', "MPLS PHP enabled for prefix {neighbor}/24")
+        ]
+        event, template = choice(events)
+        return event, template
+        
+    elif protocol == 'LLDP':
+        events = [
+            ('neighbor-add', "LLDP neighbor {neighbor} added on port {interface}"),
+            ('neighbor-remove', "LLDP neighbor {neighbor} removed from port {interface}"),
+            ('neighbor-change', "LLDP neighbor information change on port {interface}"),
+            ('mismatch', "LLDP neighbor information mismatch detected on {interface}"),
+            ('chassis-id-change', "LLDP neighbor chassis ID changed on port {interface}"),
+            ('port-id-change', "LLDP neighbor port ID changed on port {interface}"),
+            ('system-name-change', "LLDP neighbor system name changed on port {interface}"),
+            ('capability-change', "LLDP neighbor capability changed on port {interface}"),
+            ('max-neighbors', "LLDP maximum neighbors reached on port {interface}"),
+            ('ttl-expired', "LLDP neighbor entry TTL expired on port {interface}")
+        ]
+        event, template = choice(events)
+        return event, template
+        
+    elif protocol == 'STP':
+        events = [
+            ('port-state-change', "STP port {interface} state changed to {reason}"),
+            ('root-change', "STP new root bridge elected: {neighbor}"),
+            ('topology-change', "STP topology change detected on port {interface}"),
+            ('bpdu-guard', "STP BPDU guard triggered on port {interface}"),
+            ('root-guard', "STP root guard triggered on port {interface}"),
+            ('loop-guard', "STP loop guard triggered on port {interface}"),
+            ('inconsistent-port', "STP inconsistent port state on {interface}"),
+            ('bridge-priority-change', "STP bridge priority changed to {reason}"),
+            ('port-cost-change', "STP port {interface} cost changed to {reason}"),
+            ('instance-change', "STP instance created for VLAN {reason}")
+        ]
+        event, template = choice(events)
+        return event, template
+        
+    elif protocol == 'LACP':
+        events = [
+            ('port-added', "LACP port {interface} added to channel {reason}"),
+            ('port-removed', "LACP port {interface} removed from channel {reason}"),
+            ('port-up', "LACP port {interface} is UP in channel {reason}"),
+            ('port-down', "LACP port {interface} is DOWN in channel {reason}"),
+            ('system-id-change', "LACP system ID changed for channel {reason}"),
+            ('mode-change', "LACP mode changed to {reason} for channel on port {interface}"),
+            ('timeout-change', "LACP timeout changed to {reason} for port {interface}"),
+            ('synchronization-error', "LACP synchronization error on port {interface}"),
+            ('marker-response-timeout', "LACP marker response timeout on port {interface}"),
+            ('priority-change', "LACP port priority changed on {interface}")
+        ]
+        event, template = choice(events)
+        return event, template
+        
+    elif protocol == 'PIM':
+        events = [
+            ('neighbor-up', "PIM neighbor {neighbor} UP on interface {interface}"),
+            ('neighbor-down', "PIM neighbor {neighbor} DOWN on interface {interface}"),
+            ('rp-change', "PIM RP changed to {neighbor} for group {reason}"),
+            ('join-prune', "PIM Join/Prune message received from {neighbor} on {interface}"),
+            ('assert', "PIM Assert received on {interface} for group {reason}"),
+            ('register-stop', "PIM Register-Stop received from {neighbor} for source {reason}"),
+            ('bootstrap-elected', "PIM Bootstrap router elected: {neighbor}"),
+            ('dr-elected', "PIM DR elected on {interface}: {neighbor}"),
+            ('multicast-state', "PIM multicast state change for group {reason}"),
+            ('invalid-message', "PIM invalid message received from {neighbor} on {interface}")
+        ]
+        event, template = choice(events)
+        return event, template
+        
+    elif protocol == 'ISIS':
+        events = [
+            ('adjacency-up', "ISIS adjacency UP with {neighbor} on {interface}"),
+            ('adjacency-down', "ISIS adjacency DOWN with {neighbor} on {interface}: {reason}"),
+            ('lsp-update', "ISIS LSP updated for {neighbor}"),
+            ('lsp-expired', "ISIS LSP expired for {neighbor}"),
+            ('overload-bit', "ISIS overload bit set for {neighbor}"),
+            ('area-change', "ISIS area changed on {interface} to {reason}"),
+            ('authentication-failure', "ISIS authentication failure on {interface} from {neighbor}"),
+            ('mtu-mismatch', "ISIS MTU mismatch detected with {neighbor} on {interface}"),
+            ('spf-calculation', "ISIS SPF calculation triggered by change from {neighbor}"),
+            ('level-change', "ISIS level changed to {reason} on {interface}")
+        ]
+        event, template = choice(events)
+        return event, template
+        
+    elif protocol == 'VRRP':
+        events = [
+            ('master-change', "VRRP group {reason} on {interface} state changed to MASTER"),
+            ('backup-change', "VRRP group {reason} on {interface} state changed to BACKUP"),
+            ('priority-change', "VRRP group {reason} priority changed to {label}"),
+            ('advertisement-failure', "VRRP advertisement failure on {interface} for group {reason}"),
+            ('authentication-failure', "VRRP authentication failure on {interface} from {neighbor}"),
+            ('ip-mismatch', "VRRP IP address mismatch on {interface} for group {reason}"),
+            ('preempt', "VRRP preemption occurred on {interface} for group {reason}"),
+            ('timer-change', "VRRP timer changed to {label}ms for group {reason}"),
+            ('tracking-change', "VRRP tracking state changed for group {reason} on {interface}"),
+            ('virtual-mac-change', "VRRP virtual MAC changed for group {reason}")
+        ]
+        event, template = choice(events)
+        return event, template
+        
+    else:
+        # Generic protocol events
+        events = [
+            ('status-change', "{protocol} status changed to {reason}"),
+            ('configuration-change', "{protocol} configuration changed by admin"),
+            ('peer-connection', "{protocol} connection established with {neighbor}"),
+            ('peer-disconnection', "{protocol} connection lost with {neighbor}"),
+            ('error', "{protocol} error detected: {reason}"),
+            ('warning', "{protocol} warning: {reason}"),
+            ('packet-drop', "{protocol} packet dropped from {neighbor}: {reason}"),
+            ('timeout', "{protocol} timeout with {neighbor} on {interface}"),
+            ('restart', "{protocol} process restarted"),
+            ('resource-limit', "{protocol} resource limit reached: {reason}")
+        ]
+        event, template = choice(events)
+        return event, template
+
+def generate_optical_module_message(device, optic):
+    """Generate a syslog message for an optical module event"""
+    # Get interface from optic info
+    interface = optic['port']
+    vendor = optic['vendor']
+    speed = optic['speed']
+    serial = optic['serial']
+    module_id = optic['module_id']
+    
+    # Generate an optical module event
     event = generate_optical_module_event()
     
-    if event == "Module inserted":
-        return f"Interface {optic['port']}: Transceiver module ({optic['module_id']}) inserted"
-    elif event == "Module removed":
-        return f"Interface {optic['port']}: Transceiver module ({optic['module_id']}) removed"
-    elif event == "Module not compatible":
-        return f"Interface {optic['port']}: Transceiver module ({optic['module_id']}) not compatible with port configuration"
-    elif event == "Module authentication failed":
-        return f"Interface {optic['port']}: Transceiver module ({optic['module_id']}) authentication failed"
-    elif event == "DDM threshold crossed":
-        ddm_type = choice(["temperature", "voltage", "tx-power", "rx-power", "tx-bias"])
-        threshold = choice(["high alarm", "high warning", "low warning", "low alarm"])
-        value = round(uniform(1.0, 100.0), 2)
-        return f"Interface {optic['port']}: Transceiver module ({optic['module_id']}) {ddm_type} {threshold} threshold crossed. Current value: {value}"
-    elif "power" in event.lower():
-        if "high" in event.lower():
-            value = round(uniform(2.0, 5.0), 2)
-        else:  # low
-            value = round(uniform(-30.0, -15.0), 2)
-        if "rx" in event.lower():
-            return f"Interface {optic['port']}: Transceiver module ({optic['module_id']}) RX power {value} dBm threshold crossed"
-        else:  # tx
-            return f"Interface {optic['port']}: Transceiver module ({optic['module_id']}) TX power {value} dBm threshold crossed"
+    # Create message templates based on event
+    templates = {
+        "Rx power high": "Transceiver {interface} RX power high warning: {value:.2f}dBm ({module_id})",
+        "Rx power low": "Transceiver {interface} RX power low warning: {value:.2f}dBm ({module_id})",
+        "Tx power high": "Transceiver {interface} TX power high warning: {value:.2f}dBm ({module_id})",
+        "Tx power low": "Transceiver {interface} TX power low warning: {value:.2f}dBm ({module_id})",
+        "Temperature high": "Transceiver {interface} Temperature high warning: {value:.1f}°C ({module_id})",
+        "Temperature low": "Transceiver {interface} Temperature low warning: {value:.1f}°C ({module_id})",
+        "Voltage high": "Transceiver {interface} Voltage high warning: {value:.2f}V ({module_id})",
+        "Voltage low": "Transceiver {interface} Voltage low warning: {value:.2f}V ({module_id})",
+        "Bias current high": "Transceiver {interface} Bias current high warning: {value:.2f}mA ({module_id})",
+        "Bias current low": "Transceiver {interface} Bias current low warning: {value:.2f}mA ({module_id})",
+        "Module inserted": "Transceiver {interface} inserted: Vendor {vendor}, Type {speed} ({module_id})",
+        "Module removed": "Transceiver {interface} removed",
+        "Module not compatible": "Transceiver {interface} not compatible with port: {vendor} {speed} ({module_id})",
+        "Module authentication failed": "Transceiver {interface} authentication failed: {vendor} S/N {serial} ({module_id})",
+        "DDM threshold crossed": "Transceiver {interface} {parameter} threshold crossed: {value} ({module_id})"
+    }
+    
+    # Get the template for this event, or use a generic one if not found
+    template = templates.get(event, "Transceiver {interface} {event} ({module_id})")
+    
+    # Generate values based on the event
+    if "power" in event.lower():
+        value = uniform(-10.0, 3.0) if "high" in event.lower() else uniform(-25.0, -15.0)
     elif "temperature" in event.lower():
-        if "high" in event.lower():
-            value = round(uniform(70.0, 95.0), 2)
-        else:  # low
-            value = round(uniform(-5.0, 10.0), 2)
-        return f"Interface {optic['port']}: Transceiver module ({optic['module_id']}) temperature {value}C threshold crossed"
+        value = uniform(70.0, 85.0) if "high" in event.lower() else uniform(0.0, 10.0)
     elif "voltage" in event.lower():
-        if "high" in event.lower():
-            value = round(uniform(3.6, 4.5), 2)
-        else:  # low
-            value = round(uniform(2.0, 2.9), 2)
-        return f"Interface {optic['port']}: Transceiver module ({optic['module_id']}) voltage {value}V threshold crossed"
+        value = uniform(3.4, 3.6) if "high" in event.lower() else uniform(2.8, 3.0)
     elif "bias" in event.lower():
-        if "high" in event.lower():
-            value = round(uniform(80, 120), 2)
-        else:  # low
-            value = round(uniform(1, 10), 2)
-        return f"Interface {optic['port']}: Transceiver module ({optic['module_id']}) bias current {value}mA threshold crossed"
+        value = uniform(70.0, 85.0) if "high" in event.lower() else uniform(1.0, 5.0)
+    elif "threshold" in event.lower():
+        parameters = ["temperature", "voltage", "bias current", "rx power", "tx power"]
+        parameter = choice(parameters)
+        value = f"{uniform(0.1, 100.0):.2f}" 
     else:
-        return f"Interface {optic['port']}: Transceiver module ({optic['module_id']}) {event}"
+        value = 0.0
+        parameter = ""
+    
+    # Format the message with appropriate values
+    message = template.format(
+        interface=interface,
+        event=event,
+        module_id=module_id,
+        vendor=vendor,
+        speed=speed,
+        serial=serial,
+        value=value,
+        parameter=parameter if "threshold" in event.lower() else ""
+    )
+    
+    return message
 
 def generate_message(device, device_info, optics_info, l3_info):
+    """Generate a syslog message and return with parsed event information"""
     device_name, ip, vendor = device_info
+    event_types = ['physical_port', 'optical_module', 'l3_protocol', 'system']
+    weights = [0.25, 0.25, 0.30, 0.20]  # Higher weight for protocol events
     
-    # Pick a message type
-    message_types = [
-        'physical_port', 
-        'optical_module', 
-        'protocol', 
-        'system', 
-        'authentication'
-    ]
+    event_type = np.random.choice(event_types, p=weights)
     
-    # Adjust probabilities based on environment - more optical and protocol messages
-    message_type_weights = [0.25, 0.25, 0.25, 0.15, 0.1]
-    message_type = random.choices(message_types, weights=message_type_weights, k=1)[0]
+    # Create parsed event dictionary to hold structured data
+    parsed_event = {
+        'event_type': event_type,
+    }
     
-    if message_type == 'physical_port':
-        # Physical port events (interface up/down, errors, etc.)
-        event = generate_physical_port_event()
-        port = f"Eth{randint(1,8)}/{randint(1,48)}"
-        message = f"Interface {port}: {event}"
+    if event_type == 'physical_port':
+        # Physical port events
+        port_event = generate_physical_port_event()
+        interface = choice(INTERFACES)
+        message = f"Interface {interface}: {port_event}"
+        parsed_event.update({
+            'interface': interface,
+            'event': port_event,
+            'protocol': '',
+            'neighbor_ip': '',
+            'reason': f"{port_event} on {interface}"
+        })
+        return message, parsed_event
         
-    elif message_type == 'optical_module':
+    elif event_type == 'optical_module':
         # Optical module events
-        if optics_info and device in optics_info and optics_info[device]:
-            message = generate_optical_module_message(device, optics_info[device])
-        else:
-            # Fallback if no optical info is available
-            port = f"Eth{randint(1,8)}/{randint(1,48)}"
-            event = generate_optical_module_event()
-            message = f"Interface {port}: {event}"
+        if device_name in optics_info and optics_info[device_name]:
+            # Use real optic module information
+            optic = choice(optics_info[device_name])
+            interface = optic['port']
+            vendor = optic['vendor']
+            speed = optic['speed']
+            module_id = optic['module_id']
+            serial = optic['serial']
+            datacenter = optic['datacenter']
+            pod = optic['pod']
+            rack = optic['rack']
             
-    elif message_type == 'protocol':
-        # Protocol-related events
-        protocol = choice(PROTOCOLS)
-        event = generate_l3_protocol_event(protocol)
-        if protocol == 'BGP' and l3_info.get(device, {}).get('bgp', False):
-            peer_ip = f"10.{randint(1,254)}.{randint(1,254)}.{randint(1,254)}"
-            bgp_as = l3_info[device]['bgp_as']
-            message = f"{protocol}: Neighbor {peer_ip} (AS {bgp_as}) {event}"
-        elif protocol == 'OSPF' and l3_info.get(device, {}).get('ospf', False):
-            area_id = l3_info[device]['ospf_area']
-            message = f"{protocol}: {event} in area {area_id}"
-        elif protocol == 'VXLAN' and l3_info.get(device, {}).get('vxlan', False):
-            vni = choice(l3_info[device]['vxlan_vni']) if l3_info[device]['vxlan_vni'] else randint(1000, 9000)
-            message = f"{protocol}: VNI {vni} {event}"
-        elif protocol == 'MPLS' and l3_info.get(device, {}).get('mpls', False):
-            label = choice(l3_info[device]['mpls_label']) if l3_info[device]['mpls_label'] else randint(16, 1048575)
-            message = f"{protocol}: Label {label} {event}"
-        else:
-            message = f"{protocol}: {event}"
+            # Set all parsed event fields
+            parsed_event.update({
+                'interface': interface,
+                'event': generate_optical_module_event(),
+                'optic_vendor': vendor,
+                'speed': speed,
+                'datacenter': datacenter,
+                'room': pod,
+                'rack': rack,
+                'serial': serial,
+                'module_id': module_id
+            })
             
-    elif message_type == 'system':
-        # System events (CPU, memory, power, fan, etc.)
-        events = [
-            f"System CPU utilization is high: {randint(80,100)}%",
-            f"Memory utilization threshold exceeded: {randint(80,95)}%",
-            f"Power supply {randint(1,2)} state changed to {'up' if random.random() > 0.2 else 'down'}",
-            f"Fan module {randint(1,4)} {'OK' if random.random() > 0.2 else 'failure'}",
-            f"Temperature sensor {randint(1,5)} reading: {randint(25,95)}C",
-            f"System configuration {'saved' if random.random() > 0.5 else 'changed'}",
-            f"NTP synchronization {'successful' if random.random() > 0.3 else 'failed'}",
-            f"Logging {'started' if random.random() > 0.5 else 'stopped'}",
-            f"File system utilization: {randint(60,95)}%",
-            f"SNMP agent {'started' if random.random() > 0.5 else 'stopped'}"
-        ]
-        message = choice(events)
+            message = generate_optical_module_message(device_name, optic)
+        else:
+            # Generate synthetic optic information
+            interface = choice(INTERFACES)
+            vendor = choice(OPTICAL_VENDORS)
+            speed = choice(SPEEDS)
+            datacenter = choice(DATACENTERS)
+            pod = choice(PODS)
+            rack = choice(RACKS)
+            serial = f"{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', k=8))}"
+            module_id = f"{vendor}-{datacenter}-{pod}-{rack}-{device_name}-{interface}-{speed}"
+            
+            # Set parsed event fields
+            parsed_event.update({
+                'interface': interface,
+                'event': generate_optical_module_event(),
+                'optic_vendor': vendor,
+                'speed': speed,
+                'datacenter': datacenter,
+                'room': pod,
+                'rack': rack,
+                'serial': serial,
+                'module_id': module_id
+            })
+            
+            message = f"Transceiver {interface} {generate_optical_module_event()} ({module_id}, S/N: {serial})"
         
-    else:  # authentication
-        # Authentication events
-        auth_events = [
-            f"User {'admin' if random.random() > 0.7 else 'operator'} login {'successful' if random.random() > 0.3 else 'failed'} from {'.'.join([str(randint(1,255)) for _ in range(4)])}",
-            f"SSH session established from {'.'.join([str(randint(1,255)) for _ in range(4)])}",
-            f"Telnet connection attempt blocked from {'.'.join([str(randint(1,255)) for _ in range(4)])}",
-            f"TACACS+ authentication {'succeeded' if random.random() > 0.3 else 'failed'}",
-            f"RADIUS authentication {'succeeded' if random.random() > 0.3 else 'failed'}",
-            f"User {'admin' if random.random() > 0.7 else 'operator'} entered privileged mode",
-            f"Configuration change by user {'admin' if random.random() > 0.7 else 'operator'}",
-            f"Account locked due to excessive login failures: {'admin' if random.random() > 0.5 else 'operator'}",
-            f"Password change for user {'admin' if random.random() > 0.7 else 'operator'}"
-        ]
-        message = choice(auth_events)
+        return message, parsed_event
+        
+    elif event_type == 'l3_protocol':
+        # L3 protocol events (BGP, OSPF, etc.)
+        l3_config = l3_info.get(device_name, {})
+        
+        # Determine which protocols are enabled for this device
+        available_protocols = []
+        if l3_config.get('bgp', False):
+            available_protocols.append('BGP')
+        if l3_config.get('ospf', False):
+            available_protocols.append('OSPF')
+        if l3_config.get('vxlan', False):
+            available_protocols.append('VXLAN')
+        if l3_config.get('mpls', False):
+            available_protocols.append('MPLS')
+        
+        # If no protocols enabled, use random from all
+        if not available_protocols:
+            available_protocols = PROTOCOLS
+        
+        # Select a protocol
+        protocol = choice(available_protocols)
+        
+        # Protocol-specific information
+        neighbor_ip = f"{randint(1,255)}.{randint(1,255)}.{randint(1,255)}.{randint(1,255)}"
+        interface = choice(INTERFACES)
+        event, message_template = generate_l3_protocol_event(protocol)
+        
+        # Populate template with values
+        # Handle empty lists by providing default values
+        vxlan_vni = l3_config.get('vxlan_vni', [])
+        if not vxlan_vni:  # If empty list
+            vxlan_vni = [randint(1000, 9000)]
+            
+        mpls_labels = l3_config.get('mpls_label', [])
+        if not mpls_labels:  # If empty list
+            mpls_labels = [randint(16, 1048575)]
+            
+        message = message_template.format(
+            protocol=protocol,
+            neighbor=neighbor_ip,
+            interface=interface,
+            as_number=l3_config.get('bgp_as', randint(1000, 65000)),
+            area=l3_config.get('ospf_area', randint(0, 100)),
+            vni=choice(vxlan_vni),
+            label=choice(mpls_labels),
+            reason=choice(["authentication failure", "link down", "timeout", "admin shutdown", "configuration change"])
+        )
+        
+        # Set parsed event fields
+        parsed_event.update({
+            'protocol': protocol,
+            'event': event,
+            'interface': interface,
+            'neighbor_ip': neighbor_ip,
+            'reason': message.split(':')[-1].strip() if ':' in message else ''
+        })
+        
+        return message, parsed_event
     
-    # Facility selection based on message type
-    if message_type == 'physical_port' or message_type == 'optical_module':
-        facility = choice(['local3', 'local4', 'daemon'])
-    elif message_type == 'protocol':
-        facility = choice(['local0', 'local1', 'local2'])
-    elif message_type == 'system':
-        facility = choice(['kern', 'daemon', 'syslog'])
-    else:  # authentication
-        facility = choice(['auth', 'authpriv', 'local7'])
-    
-    # Severity selection based on content
-    if 'error' in message.lower() or 'fail' in message.lower() or 'down' in message.lower():
-        severity = choice(['err', 'crit', 'alert'])
-    elif 'warn' in message.lower() or 'high' in message.lower():
-        severity = 'warning'
-    elif 'notif' in message.lower() or 'up' in message.lower() or 'success' in message.lower():
-        severity = 'notice'
     else:
-        severity = choice(['info', 'debug'])
-    
-    return facility, severity, message
+        # System events
+        system_events = [
+            f"System cold start",
+            f"System warm start",
+            f"Fan {randint(1,4)} failure",
+            f"Power supply {randint(1,2)} failure",
+            f"Temperature sensor {randint(1,4)} high threshold exceeded: {randint(70,95)}°C",
+            f"CPU utilization threshold exceeded: {randint(80,99)}%",
+            f"Memory utilization threshold exceeded: {randint(80,99)}%",
+            f"Packet buffer congestion on {choice(INTERFACES)}",
+            f"Authentication failure for user admin from {randint(1,255)}.{randint(1,255)}.{randint(1,255)}.{randint(1,255)}",
+            f"Configuration changed by user admin",
+            f"System time changed from {randint(1,12)}:{randint(0,59)}:{randint(0,59)} to {randint(1,12)}:{randint(0,59)}:{randint(0,59)}",
+            f"SNMP authentication failure",
+            f"Link flap detected on {choice(INTERFACES)}",
+            f"NTP synchronization lost with {randint(1,255)}.{randint(1,255)}.{randint(1,255)}.{randint(1,255)}",
+            f"MAC address table full, current entries: {randint(10000,50000)}",
+            f"Route table full, current entries: {randint(10000,500000)}",
+            f"Software upgrade initiated",
+            f"Software upgrade completed successfully",
+            f"Software upgrade failed",
+            f"Backup configuration to {randint(1,255)}.{randint(1,255)}.{randint(1,255)}.{randint(1,255)} failed",
+            f"Interface {choice(INTERFACES)} disabled due to broadcast storm",
+            f"Interface {choice(INTERFACES)} disabled due to STP BPDU guard",
+            f"DHCP snooping drop: {randint(1,255)}.{randint(1,255)}.{randint(1,255)}.{randint(1,255)} on {choice(INTERFACES)}",
+            f"ACL dropped packet from {randint(1,255)}.{randint(1,255)}.{randint(1,255)}.{randint(1,255)} to {randint(1,255)}.{randint(1,255)}.{randint(1,255)}.{randint(1,255)}"
+        ]
+        
+        message = choice(system_events)
+        
+        # Extract interface from message if present
+        interface = None
+        if "Interface " in message:
+            interface_part = message.split("Interface ")[1].split(" ")[0]
+            interface = interface_part.strip()
+        
+        # Set parsed event fields
+        parsed_event.update({
+            'event': 'system',
+            'interface': interface if interface else '',
+            'reason': message
+        })
+        
+        return message, parsed_event
 
 def generate_syslog_data(num_events, start_date, end_date):
-    """Generate synthetic syslog messages for network devices"""
-    # Parse start and end dates
-    start_dt = datetime.strptime(start_date, '%Y-%m-%d')
-    end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+    """Generate syslog events for a specified time period"""
+    # Setup environment
+    environment_type = 'datacenter'
+    num_devices = 30  # Enough to create variety
     
-    # Calculate time window in seconds
-    time_window = int((end_dt - start_dt).total_seconds())
+    # Create devices, optics and L3 config
+    devices = setup_network_devices(environment_type, num_devices)
+    optics_info = generate_device_optics(devices, environment_type)
+    l3_info = generate_device_l3_config(devices, environment_type)
     
-    # Environment defaults
-    environment = 'datacenter'  # Default to datacenter environment
+    # Convert dates if needed
+    if isinstance(start_date, str):
+        start_date = datetime.strptime(start_date, '%Y-%m-%d')
+    if isinstance(end_date, str):
+        end_date = datetime.strptime(end_date, '%Y-%m-%d')
     
-    # Generate device information
-    num_devices = min(100, num_events // 10)  # Ensure reasonable number of devices
-    devices = setup_network_devices(environment, num_devices)
+    # Calculate time range in seconds
+    time_range = (end_date - start_date).total_seconds()
     
-    # Generate optics information
-    device_optics = generate_device_optics(devices, environment)
-    
-    # Generate L3 protocol information
-    device_l3 = generate_device_l3_config(devices, environment)
-    
-    # Generate the events
+    # Generate random events
     syslog_events = []
-    
-    for _ in range(num_events):
-        # Random timestamp within date range
-        event_timestamp = start_dt + timedelta(seconds=randint(0, time_window))
-        timestamp_str = event_timestamp.strftime('%Y-%m-%d %H:%M:%S')
+    for i in range(num_events):
+        # Pick a random device
+        device, ip, vendor = random.choice(devices)
         
-        # Select a random device
-        device_info = choice(devices)
-        device_name, ip, vendor = device_info
+        # Generate a random timestamp in the range
+        random_second = random.randint(0, int(time_range))
+        timestamp = start_date + timedelta(seconds=random_second)
         
-        # Get device-specific information
-        optics_info = device_optics.get(device_name, [])
-        l3_info = device_l3.get(device_name, {})
+        # Select severity and facility
+        severity = choice(SEVERITY_LEVELS)
+        facility = choice(FACILITY_LEVELS)
         
-        # Generate message for event
-        facility, severity, message = generate_message(device_name, device_info, optics_info, l3_info)
+        # Generate message
+        raw_message, parsed_event = generate_message(device, (device, ip, vendor), optics_info, l3_info)
         
-        # Get appropriate syslog format function based on vendor
+        # Format for vendor
         syslog_generator = get_syslog_generator(vendor)
+        formatted_message = syslog_generator(
+            timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+            device,
+            ip,
+            severity,
+            facility,
+            raw_message
+        )
         
-        # Generate syslog message
-        syslog_msg = syslog_generator(timestamp_str, device_name, ip, severity, facility, message)
+        # Extract or generate module_id based on message content
+        # For optical module messages, attempt to extract or create module_id
+        module_id = ""
+        if parsed_event.get('event_type') == 'optical_module':
+            # If we have optics info for this device, try to match it
+            if optics_info.get(device) and parsed_event.get('interface'):
+                for optic in optics_info[device]:
+                    if optic['port'] == parsed_event.get('interface'):
+                        module_id = optic['module_id']
+                        break
+            
+            # If no match was found, create a module_id
+            if not module_id:
+                module_id = create_new_module_id(device, raw_message, optics_info.get(device, []))
         
-        # Create syslog record with standard fields
-        record = {
-            'timestamp': timestamp_str,
+        # Create event record with consistent field names
+        event = {
+            'timestamp': timestamp.strftime('%Y-%m-%d %H:%M:%S'),
             'device_ip': ip,
-            'device_name': device_name,
+            'device_hostname': device,  # Use hostname as device name
+            'device_vendor': vendor,
             'facility': facility,
             'severity': severity,
-            'vendor': vendor,
-            'message': message,
-            'syslog_message': syslog_msg,
-            'module_id': ""  # 默认为空字符串
+            'message': formatted_message,
+            'module_id': module_id,
+            'datacenter': parsed_event.get('datacenter', choice(DATACENTERS)),
+            'room': parsed_event.get('room', choice(PODS)),
+            'rack': parsed_event.get('rack', choice(RACKS)),
+            'interface': parsed_event.get('interface', ''),
+            'speed': parsed_event.get('speed', ''),
+            'parsed_event.protocol': parsed_event.get('protocol', ''),
+            'parsed_event.event': parsed_event.get('event', ''),
+            'parsed_event.interface': parsed_event.get('interface', ''),
+            'parsed_event.neighbor_ip': parsed_event.get('neighbor_ip', ''),
+            'parsed_event.reason': parsed_event.get('reason', '')
         }
         
-        # 判断是否为光模块相关消息并提取/生成module_id
-        optical_related_keywords = [
-            'module', 'transceiver', 'optical', 'tx power', 'rx power', 
-            'temperature', 'voltage', 'bias', 'ddm'
-        ]
-        
-        is_optical_message = False
-        # 检查消息中是否包含关键字(不区分大小写)
-        lowercase_message = message.lower()
-        for keyword in optical_related_keywords:
-            if keyword in lowercase_message:
-                is_optical_message = True
-                break
-        
-        # 如果是光模块相关消息，生成或提取module_id
-        if is_optical_message:
-            # 从消息中提取module_id (如果有)
-            if "(" in message and ")" in message:
-                module_id_part = message[message.find("(")+1:message.find(")")]
-                if "-" in module_id_part and module_id_part.count("-") >= 6:  # 符合格式的module_id应该有至少6个连字符
-                    record['module_id'] = module_id_part
-                else:
-                    # 生成新的module_id
-                    record['module_id'] = create_new_module_id(device_name, message, optics_info)
-            else:
-                # 没有括号中的module_id，需要新生成
-                record['module_id'] = create_new_module_id(device_name, message, optics_info)
-                
-        syslog_events.append(record)
+        syslog_events.append(event)
     
-    return syslog_events
-
-def create_new_module_id(device_name, message, optics_info):
-    """从消息和可用的光模块信息创建module_id"""
-    # 尝试从消息中提取接口名称
-    interface = None
-    if "Interface " in message:
-        # 消息格式可能是 "Interface Eth1/1: something"
-        parts = message.split(":")
-        if len(parts) > 0:
-            interface_part = parts[0].strip()
-            if "Interface " in interface_part:
-                interface = interface_part.replace("Interface ", "").strip()
-    
-    # 如果接口提取成功，尝试在已有optics信息中查找匹配的module_id
-    if interface and optics_info:
-        for optic in optics_info:
-            if optic.get('port') == interface and 'module_id' in optic:
-                return optic['module_id']
-    
-    # 如果没有找到匹配的module_id，创建一个新的
-    optical_vendor = choice(OPTICAL_VENDORS)
-    datacenter = choice(DATACENTERS)
-    pod = choice(PODS)
-    rack = choice(RACKS)
-    
-    # 如果接口名称未能提取，生成一个随机接口
-    if not interface:
-        interface = f"Eth{randint(1,8)}/{randint(1,48)}"
-        
-    speed = choice(SPEEDS)
-    
-    return f"{optical_vendor}-{datacenter}-{pod}-{rack}-{device_name}-{interface}-{speed}"
-
-def write_to_parquet(syslog_events, output_file='syslog_data.parquet'):
-    """Convert syslog events to a Parquet file"""
     # Convert to DataFrame
     df = pd.DataFrame(syslog_events)
     
-    # Ensure all required columns exist
-    required_columns = ['timestamp', 'device_ip', 'device_name', 'facility', 
-                        'severity', 'vendor', 'message', 'syslog_message', 'module_id']
-    
-    for col in required_columns:
+    # Ensure all required columns are present
+    for col in ['datacenter', 'room', 'rack', 'device_hostname', 'device_ip', 
+                'device_vendor', 'interface', 'speed', 'module_id']:
         if col not in df.columns:
-            if col == 'module_id':
-                df[col] = ""
+            if col in ['datacenter', 'room', 'rack']:
+                df[col] = [choice(DATACENTERS if col == 'datacenter' else 
+                                 PODS if col == 'room' else RACKS) for _ in range(len(df))]
             else:
-                df[col] = None
+                df[col] = ''
     
-    # Write to Parquet format
-    import pyarrow as pa
-    import pyarrow.parquet as pq
+    # Sort by timestamp
+    df = df.sort_values(by='timestamp')
     
+    return df
+
+def create_new_module_id(device_name, message, optics_info):
+    """Create a new module_id from message content when possible"""
+    # Try to extract interface name from message
+    interface_pattern = r'(Eth\d+/\d+|TenGig\d+/\d+|FortyGig\d+/\d+|HundredGig\d+/\d+|Ethernet\d+/\d+)'
+    interface_match = re.search(interface_pattern, message)
+    interface = interface_match.group(1) if interface_match else None
+    
+    if not interface:
+        return ""
+    
+    # Try to find matching optic info for this interface
+    matching_optic = None
+    for optic in optics_info:
+        if optic['port'] == interface:
+            matching_optic = optic
+            break
+    
+    # If we found matching optic info, use it to build module_id
+    if matching_optic:
+        return matching_optic['module_id']
+    
+    # Otherwise build a generic module_id
+    vendor = choice(OPTICAL_VENDORS)
+    datacenter = choice(DATACENTERS)
+    pod = choice(PODS)
+    rack = choice(RACKS)
+    speed = choice(SPEEDS)
+    
+    # Create module_id in standard format
+    module_id = f"{vendor}-{datacenter}-{pod}-{rack}-{device_name}-{interface}-{speed}"
+    return module_id
+
+def write_to_parquet(syslog_events, output_file='syslog_data.parquet'):
+    """Write syslog events to Parquet format"""
+    # Ensure we have a DataFrame
+    if not isinstance(syslog_events, pd.DataFrame):
+        df = pd.DataFrame(syslog_events)
+    else:
+        df = syslog_events
+    
+    # Make sure all required fields are present according to new data structure
+    required_fields = [
+        'timestamp', 'module_id', 'datacenter', 'room', 'rack', 'device_hostname', 
+        'device_ip', 'device_vendor', 'interface', 'speed', 'facility', 'severity', 
+        'message', 'parsed_event.protocol', 'parsed_event.event', 'parsed_event.interface',
+        'parsed_event.neighbor_ip', 'parsed_event.reason'
+    ]
+    
+    for field in required_fields:
+        if field not in df.columns:
+            df[field] = ''
+    
+    # Create PyArrow table and write to Parquet
     table = pa.Table.from_pandas(df)
     pq.write_table(table, output_file)
     
-    print(f"Generated {len(syslog_events)} syslog events and saved to {output_file}")
-    print(f"Data includes {df['device_name'].nunique()} devices")
+    print(f"Generated {len(df)} syslog events saved to {output_file}")
+    print(f"Events contain {len([x for x in df['module_id'] if x])} records with valid module_id")
     print(f"Fields included: {len(df.columns)}")
-    
+    print(f"Unique devices: {df['device_hostname'].nunique()}")
+    print(f"Unique protocols: {df['parsed_event.protocol'].nunique()}")
     return output_file
 
 def main():
-    # Add argument parsing
-    parser = argparse.ArgumentParser(description='Generate synthetic Syslog data for network devices')
-    parser.add_argument('--count', type=int, default=1000000, help='Number of events to generate (default: 1,000,000)')
-    parser.add_argument('--devices', type=int, default=1000, help='Number of network devices to simulate (default: 1,000)')
-    parser.add_argument('--start-date', type=str, default="2025-02-01", help='Start date in YYYY-MM-DD format (default: 2025-02-01)')
-    parser.add_argument('--end-date', type=str, default="2025-03-01", help='End date in YYYY-MM-DD format (default: 2025-03-01)')
-    parser.add_argument('--output', type=str, default="network_syslog_data.parquet", help='Output filename (default: network_syslog_data.parquet)')
-    parser.add_argument('--environment', type=str, choices=['datacenter', 'enterprise', 'isp', 'campus'], default='datacenter',
-                       help='Network environment to simulate (default: datacenter)')
-    
+    parser = argparse.ArgumentParser(description='Generate syslog data for network devices')
+    parser.add_argument('--count', type=int, default=10000, help='Number of syslog events to generate')
+    parser.add_argument('--start', type=str, default='2025-02-01', help='Start date (YYYY-MM-DD)')
+    parser.add_argument('--end', type=str, default='2025-03-01', help='End date (YYYY-MM-DD)')
+    parser.add_argument('--output', type=str, default='syslog_data.parquet', help='Output file name')
     args = parser.parse_args()
     
-    # Parameters from arguments
     num_events = args.count
-    num_devices = min(args.devices, 10000)  # Limit to reasonable number
-    start_date = args.start_date
-    end_date = args.end_date
+    start_date = args.start
+    end_date = args.end
     output_file = args.output
-    environment = args.environment
     
-    print(f"Generating {num_events:,} Syslog events from {start_date} to {end_date}...")
-    print(f"Network environment: {environment}")
-    print(f"Simulating {num_devices:,} devices")
+    print(f"Generating {num_events} Syslog events from {start_date} to {end_date}...")
+    print(f"Network environment: datacenter")
+    print(f"Simulating 1,000 devices")
     
-    # Generate data
-    syslog_events = generate_syslog_data(num_events, start_date, end_date)
+    # Generate syslog data
+    syslog_df = generate_syslog_data(num_events, start_date, end_date)
     
-    # Save to parquet
-    write_to_parquet(syslog_events, output_file)
+    # Write to Parquet
+    write_to_parquet(syslog_df, output_file)
     
-    print(f"Generated {len(syslog_events):,} Syslog events and saved to {output_file}")
+    # Print summary info
+    print(f"Generated {len(syslog_df):,} Syslog events and saved to {output_file}")
     print(f"Data range: {start_date} to {end_date}")
-    print(f"Unique devices: {len(set(event['device_name'] for event in syslog_events))}")
-    print(f"Vendors: {', '.join(set(event['vendor'] for event in syslog_events))}")
+    print(f"Unique devices: {syslog_df['device_hostname'].nunique()}")
+    print(f"Vendors: {', '.join(syslog_df['device_vendor'].unique())}")
     
 if __name__ == "__main__":
     main() 
