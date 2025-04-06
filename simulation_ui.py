@@ -197,12 +197,12 @@ with sim_tab:
             },
             {
                 "name": "SNMP Data", 
-                "command": f"python generate_snmp_data.py --count {record_count} --start-date {start_date_str} --end-date {end_date_str} --output {snmp_output}",
+                "command": f"python generate_snmp_data.py --count {record_count} --start {start_date_str} --end {end_date_str} --output {snmp_output} --environment {'datacenter' if environment == 'complete' else environment}",
                 "status": "pending"
             },
             {
                 "name": "Syslog Data", 
-                "command": f"python generate_syslog_data.py --count {record_count} --start-date {start_date_str} --end-date {end_date_str} --output {syslog_output}",
+                "command": f"python generate_syslog_data.py --count {record_count} --start {start_date_str} --end {end_date_str} --output {syslog_output}",
                 "status": "pending"
             },
             {

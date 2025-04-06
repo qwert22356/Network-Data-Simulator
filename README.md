@@ -78,4 +78,56 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## 🙏 Acknowledgments
 
 - Built with Streamlit for a responsive UI
-- Uses Pandas and PyArrow for efficient data handling 
+- Uses Pandas and PyArrow for efficient data handling
+
+## 📊 数据结构
+
+为确保跨数据类型的一致性，所有生成的数据都遵循以下统一结构：
+
+### 共同字段
+
+所有表都包含以下共同字段:
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| timestamp | datetime | 数据时间戳（ISO格式）|
+| module_id | string | 唯一标识，如 CISCO-DC1-Pod01-Rack01-SW01-Eth1/1-100G |
+| datacenter | string | 数据中心标识 |
+| room | string | 机房/Pod |
+| rack | string | 机架 |
+| device_hostname | string | 设备名称 |
+| device_ip | string | 设备IP |
+| device_vendor | string | 厂商名称 |
+| interface | string | 接口名称，如 Ethernet1/1 |
+| speed | string | 接口速率，如 100G |
+
+### 数据类型和字段特点
+
+1. **gRPC接口指标 (grpc_interface_metrics)**
+   - 用途：采集gRPC实时指标数据，1分钟粒度
+   - 包含接口状态、性能指标、光模块参数等
+
+2. **SNMP接口状态 (snmp_interface_status)**
+   - 用途：采集SNMP接口状态、广播风暴、链路异常、MAC统计等
+   - 包含标准MIB字段如ifIndex、ifAdminStatus、ifOperStatus等
+
+3. **系统日志事件 (syslog-events)**
+   - 用途：结构化存储网络设备syslog日志
+   - 包含facility、severity、事件类型解析等字段
+
+4. **光模块指标 (module_ddm_metrics)**
+   - 用途：光模块历史DDM指标，供模型训练与趋势分析
+   - 包含温度、电压、电流、发射功率、接收功率等
+
+5. **预测结果 (prediction_result)**
+   - 用途：记录AI模型对光模块的预测结果和命中规则
+   - 包含故障概率、预测故障时间、模型名称、剩余寿命等
+
+### 数据关联
+
+各数据类型可通过共同字段进行关联分析，特别是:
+- `module_id`：跨所有数据类型的唯一标识
+- `timestamp`：支持时间序列分析
+- `device_hostname`、`interface`：支持设备和接口级别分析
+
+完整字段定义请参考代码中的`data_structure.md`文件。 
